@@ -32,7 +32,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={styles.logo}>🎨</div>
           <div>
-            <h1 style={styles.logoTitle}>Muscle Painter</h1>
+            <h1 style={styles.logoTitle}>Muscle Picasso</h1>
             <p style={styles.logoSub}>3D anatomical model</p>
           </div>
         </div>
