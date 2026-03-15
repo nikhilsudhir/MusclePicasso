@@ -1,8 +1,8 @@
-# 🎨 Muscle Painter 3D
+# 🎨 Muscle Picasso 3D
 
 Paint directly on a 3D anatomical model to select muscle groups, then generate a targeted workout plan.
 
-![Muscle Painter](https://img.shields.io/badge/React-18-blue) ![Three.js](https://img.shields.io/badge/Three.js-r170-green) ![Vite](https://img.shields.io/badge/Vite-5-purple)
+![Muscle Picasso](https://img.shields.io/badge/React-18-blue) ![Three.js](https://img.shields.io/badge/Three.js-r170-green) ![Vite](https://img.shields.io/badge/Vite-5-purple)
 
 ---
 
@@ -119,10 +119,6 @@ muscle-painter-project/
 ---
 
 ## Customization
-
-### Add more exercises
-
-Edit `src/exercises.js` — add new muscle groups or exercises to existing groups.
 
 ### Change muscle colors
 
