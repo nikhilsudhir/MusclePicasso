@@ -90,39 +90,69 @@ function detectMuscleFromPoint(point) {
   // Head/neck — no muscle to target
   if (y > 1.9) return null
 
-  // Arms — identified by significant lateral displacement from torso centre
+  // Arms — significant lateral displacement from torso centre
   if (absX > 0.28 && y > 0.85 && y < 1.85) {
-    if (y > 1.6) return 'shoulders'
+    if (y > 1.6) {
+      // Deltoid — split front / side / rear by z depth
+      if (z > 0.03) return 'front_delt'
+      if (z < -0.03) return 'rear_delt'
+      return 'side_delt'
+    }
     if (y > 1.25) return z >= 0 ? 'biceps' : 'triceps'
     return 'forearms'
   }
 
-  // Shoulder caps (deltoid top)
-  if (absX > 0.2 && y > 1.6 && y < 1.85) return 'shoulders'
+  // Shoulder caps — same front/side/rear split
+  if (absX > 0.2 && y > 1.6 && y < 1.85) {
+    if (z > 0.03) return 'front_delt'
+    if (z < -0.03) return 'rear_delt'
+    return 'side_delt'
+  }
 
   // Traps — upper back / neck base
   if (y > 1.6 && y < 1.85 && absX < 0.2 && z < 0.05) return 'traps'
 
-  // Chest — front of upper torso
-  if (y > 1.2 && y < 1.65 && z > 0.05) return 'chest'
+  // Upper chest — clavicular head (incline zone)
+  if (y > 1.48 && y < 1.65 && z > 0.05) return 'upper_chest'
 
-  // Back — rear of upper torso
-  if (y > 1.0 && y < 1.7 && z < -0.05) return 'back'
+  // Lower chest — sternal head (flat/decline zone)
+  if (y > 1.22 && y < 1.48 && z > 0.08) return 'lower_chest'
 
-  // Abs — front of mid torso
-  if (y > 0.85 && y < 1.3 && z > -0.05) return 'abs'
+  // Lats — outer/lateral back sweep
+  if (y > 1.05 && y < 1.6 && z < -0.03 && absX > 0.13) return 'lats'
 
-  // Glutes — rear lower torso
-  if (y > 0.75 && y < 1.1 && z < 0) return 'glutes'
+  // Mid Back — rhomboids / central upper back
+  if (y > 1.3 && y < 1.65 && z < -0.05) return 'mid_back'
+
+  // Lower Back — erector spinae / lumbar
+  if (y > 1.0 && y < 1.3 && z < -0.05) return 'lower_back'
+
+  // Obliques — lateral sides of torso (checked before abs)
+  if (y > 1.0 && y < 1.38 && absX > 0.12 && z > -0.03) return 'obliques'
+
+  // Upper Abs — above navel
+  if (y > 1.18 && y < 1.38 && z >= 0) return 'upper_abs'
+
+  // Lower Abs — below navel
+  if (y > 1.0 && y < 1.18 && z >= 0) return 'lower_abs'
+
+  // Glute Med — upper/outer glutes (checked before glute max)
+  if (y > 1.0 && y < 1.15 && z < 0 && absX > 0.08) return 'glute_med'
+
+  // Glute Max — main gluteal mass
+  if (y > 0.75 && y < 1.1 && z < 0) return 'glute_max'
+
+  // Gastrocnemius — upper/outer calf (checked before hamstrings to avoid z < 0 clash)
+  if (y > 0.18 && y < 0.38) return 'gastrocnemius'
+
+  // Soleus — lower calf
+  if (y >= 0 && y < 0.18) return 'soleus'
 
   // Quads — front thigh
-  if (y > 0.35 && y < 0.85 && z >= 0) return 'quads'
+  if (y > 0.38 && y < 0.85 && z >= 0) return 'quads'
 
-  // Hamstrings — rear thigh
-  if (y > 0.3 && y < 0.85 && z < 0) return 'hamstrings'
-
-  // Calves
-  if (y >= 0 && y < 0.35) return 'calves'
+  // Hamstrings — rear thigh (lower bound raised to clear calf region)
+  if (y > 0.38 && y < 0.85 && z < 0) return 'hamstrings'
 
   return null
 }

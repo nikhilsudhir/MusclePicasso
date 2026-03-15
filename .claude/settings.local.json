@@ -5,7 +5,8 @@
       "Skill(claude-api:*)",
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
-      "Bash(del \"c:\\\\Users\\\\Nikhil\\\\Documents\\\\git\\\\musclePainterProject\\\\src\\\\workoutAI.js\")"
+      "Bash(del \"c:\\\\Users\\\\Nikhil\\\\Documents\\\\git\\\\musclePainterProject\\\\src\\\\workoutAI.js\")",
+      "WebFetch(domain:exercisedb.dev)"
     ]
   }
 }

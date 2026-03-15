@@ -1,11 +1,166 @@
-import { EXERCISES } from './exercises'
+import { useState, useEffect } from 'react'
+import { EXERCISES, EFFECTIVE_FOR, fetchMuscleExercises, classifyDifficulty, assignRepScheme, assignCalisthenicsRepScheme, getExerciseRole } from './exercises'
+
+const DIFF_COLOR = { Beginner: '#3bff8a', Intermediate: '#ffb03b', Advanced: '#ff3b5c' }
+const ROLE_COLOR = { 'Main Lift': '#ff3b5c', 'Accessory': '#ff7b3b', 'Isolation': '#3bb8ff' }
+const DIFF_FILTERS = ['All', 'Beginner', 'Intermediate', 'Advanced']
+const DEFAULT_TOTAL = 6
+const FETCH_LIMIT = 25
+
+const BODYWEIGHT_EQUIPMENT = ['body weight', 'assisted', 'band', 'resistance band', 'suspension']
+
+function isBodyweight(exercise) {
+  const eq = (exercise.equipments ?? []).map((e) => e.toLowerCase())
+  return eq.length === 0 || eq.some((e) => BODYWEIGHT_EQUIPMENT.some((b) => e.includes(b)))
+}
+
+// Ranks how gym-accessible an exercise is. Higher = more likely to be in a normal gym.
+function gymScore(exercise) {
+  const eq = (exercise.equipments ?? []).map((e) => e.toLowerCase()).join(' ')
+  if (eq.includes('barbell') || eq.includes('olympic'))  return 10
+  if (eq.includes('dumbbell'))                            return 9
+  if (eq.includes('cable'))                               return 8
+  if (eq.includes('leverage machine') || eq.includes('smith machine')) return 7
+  if (eq.includes('ez barbell'))                          return 7
+  if (eq.includes('kettlebell'))                          return 6
+  if (eq.includes('medicine ball') || eq.includes('weighted')) return 5
+  if (eq.includes('body weight'))                         return 3
+  if (eq.includes('band') || eq.includes('suspension'))   return 2
+  return 4 // unknown / other
+}
+
+// Reverse map: apiMuscle name → muscleId (e.g. "pectorals" → "chest")
+const API_TO_ID = Object.fromEntries(
+  Object.entries(EXERCISES).map(([id, cfg]) => [cfg.apiMuscle, id])
+)
+
+// Score an exercise by how effectively it trains the painted muscles.
+// Curated effectiveness keywords (10pts) > API target match (3pts) > API secondary match (1pt).
+// This ensures e.g. back squat always beats push-up for glutes.
+function scoreExercise(ex, paintedMuscleIds) {
+  const name = (ex.name ?? '').toLowerCase()
+  const targets = (ex.targetMuscles ?? []).map((m) => m.toLowerCase())
+  const secondary = (ex.secondaryMuscles ?? []).map((m) => m.toLowerCase())
+
+  return paintedMuscleIds.reduce((total, muscleId) => {
+    const apiMuscle = EXERCISES[muscleId]?.apiMuscle ?? ''
+    const keywords = EFFECTIVE_FOR[muscleId] ?? []
+    if (keywords.some((k) => name.includes(k))) return total + 10
+    if (targets.includes(apiMuscle)) return total + 3
+    if (secondary.includes(apiMuscle)) return total + 1
+    return total
+  }, 0)
+}
+
+function findBestExercise(exerciseData, paintedMuscleIds) {
+  const paintedApiMuscles = paintedMuscleIds.map((id) => EXERCISES[id]?.apiMuscle).filter(Boolean)
+  let best = null
+  let bestScore = -1
+
+  for (const [muscleId, exercises] of Object.entries(exerciseData)) {
+    for (const ex of exercises) {
+      const score = scoreExercise(ex, paintedMuscleIds)
+      if (score === 0) continue
+      const total = score * 10 + gymScore(ex)
+
+      if (total > bestScore) {
+        bestScore = total
+        const covered = [...new Set([
+          ...(ex.targetMuscles ?? []).map((m) => m.toLowerCase()),
+          ...(ex.secondaryMuscles ?? []).map((m) => m.toLowerCase()),
+        ])]
+          .filter((m) => paintedApiMuscles.includes(m))
+          .map((m) => EXERCISES[API_TO_ID[m]]?.label)
+          .filter(Boolean)
+        best = { ...ex, muscleId, score, covered }
+      }
+    }
+  }
+  return best
+}
+
+// Bigger muscle = higher weight = more exercises allocated
+const MUSCLE_WEIGHT = {
+  // Large compound muscles
+  lats: 3, quads: 3, hamstrings: 3, glute_max: 3,
+  // Medium muscles
+  upper_chest: 2, lower_chest: 2, mid_back: 2, lower_back: 2, upper_abs: 2, lower_abs: 2,
+  // Smaller / isolation muscles
+  front_delt: 1, side_delt: 1, rear_delt: 1,
+  biceps: 1, triceps: 1, forearms: 1,
+  obliques: 1, traps: 1, glute_med: 1,
+  gastrocnemius: 1, soleus: 1,
+}
+
+// Distribute `total` exercises across muscles proportionally by weight.
+// Uses largest-remainder method. Muscles with 0 allocation are omitted.
+function distribute(muscleIds, total) {
+  if (muscleIds.length === 0) return {}
+  const weights = muscleIds.map((id) => MUSCLE_WEIGHT[id] ?? 1)
+  const totalWeight = weights.reduce((s, w) => s + w, 0)
+  const exact = weights.map((w) => (w / totalWeight) * total)
+  const floors = exact.map((e) => Math.floor(e))
+  let remaining = total - floors.reduce((s, f) => s + f, 0)
+  exact
+    .map((e, i) => ({ i, frac: e - Math.floor(e) }))
+    .sort((a, b) => b.frac - a.frac)
+    .forEach(({ i }, k) => { if (k < remaining) floors[i]++ })
+  return Object.fromEntries(muscleIds.map((id, i) => [id, floors[i]]))
+}
 
 export default function WorkoutPanel({ paintedMuscles, onBack }) {
-  const workout = [...paintedMuscles]
-    .filter((id) => EXERCISES[id])
-    .map((id) => ({ id, ...EXERCISES[id] }))
+  const [exerciseData, setExerciseData] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [workoutType, setWorkoutType] = useState('weights') // 'weights' | 'calisthenics'
+  const [diffFilter, setDiffFilter] = useState('All')
+  const [total, setTotal] = useState(DEFAULT_TOTAL)
 
-  const totalExercises = workout.reduce((s, g) => s + g.exercises.length, 0)
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    const muscleIds = [...paintedMuscles].filter((id) => EXERCISES[id])
+
+    Promise.all(
+      muscleIds.map((id) =>
+        fetchMuscleExercises(id, FETCH_LIMIT).then((exercises) => ({ id, exercises }))
+      )
+    )
+      .then((results) => {
+        if (cancelled) return
+        const data = {}
+        results.forEach(({ id, exercises }) => { data[id] = exercises })
+        setExerciseData(data)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message)
+          setLoading(false)
+        }
+      })
+
+    return () => { cancelled = true }
+  }, [paintedMuscles])
+
+  const muscleIds = [...paintedMuscles].filter((id) => EXERCISES[id])
+  const allocation = distribute(muscleIds, total)
+  const activeMuscleIds = muscleIds.filter((id) => (allocation[id] ?? 0) > 0)
+  function getExercises(id) {
+    let raw = exerciseData[id] ?? []
+    if (workoutType === 'calisthenics') raw = raw.filter(isBodyweight)
+    const filtered = diffFilter === 'All' ? raw : raw.filter((ex) => classifyDifficulty(ex) === diffFilter)
+    const sorted = workoutType === 'weights'
+      ? [...filtered].sort((a, b) => gymScore(b) - gymScore(a))
+      : filtered
+    return sorted.slice(0, allocation[id] ?? 0)
+  }
+
+  const bestExercise = !loading && !error ? findBestExercise(exerciseData, muscleIds) : null
+
+  const totalShown = activeMuscleIds.reduce((sum, id) => sum + getExercises(id).length, 0)
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
@@ -14,80 +169,234 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
           ← Back to Model
         </button>
 
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20, padding: 4, background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', width: 'fit-content' }}>
+          {[
+            { key: 'weights',      label: '🏋️ Weights',      accent: '#ff3b5c' },
+            { key: 'calisthenics', label: '🤸 Calisthenics',  accent: '#3bff8a' },
+          ].map(({ key, label, accent }) => (
+            <button
+              key={key}
+              onClick={() => setWorkoutType(key)}
+              style={{
+                padding: '7px 16px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                background: workoutType === key ? accent + '20' : 'transparent',
+                color: workoutType === key ? accent : '#555',
+                outline: workoutType === key ? `1px solid ${accent}40` : 'none',
+                transition: 'all 0.15s',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <h2 style={styles.title}>Your Painted Workout</h2>
         <p style={styles.subtitle}>
           Targeting {paintedMuscles.size} muscle group
-          {paintedMuscles.size !== 1 ? 's' : ''} · {totalExercises} exercises
+          {paintedMuscles.size !== 1 ? 's' : ''} · {loading ? '…' : `${totalShown} exercises`}
         </p>
 
         {/* Stats */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
           {[
-            { label: 'Muscles', value: paintedMuscles.size, color: '#ff3b5c' },
-            { label: 'Exercises', value: totalExercises, color: '#ff7b3b' },
-            { label: 'Est. Time', value: `${totalExercises * 5}min`, color: '#3bb8ff' },
+            { label: 'Muscles',   value: paintedMuscles.size,                       color: '#ff3b5c' },
+            { label: 'Exercises', value: loading ? '…' : totalShown,                color: '#ff7b3b' },
+            { label: 'Est. Time', value: loading ? '…' : `${totalShown * 5}min`,    color: '#3bb8ff' },
           ].map((s) => (
-            <div
-              key={s.label}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                background: `${s.color}10`,
-                border: `1px solid ${s.color}20`,
-              }}
-            >
+            <div key={s.label} style={{ padding: '8px 16px', borderRadius: 8, background: `${s.color}10`, border: `1px solid ${s.color}20` }}>
               <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 9, color: '#666', textTransform: 'uppercase', letterSpacing: 1 }}>
-                {s.label}
-              </div>
+              <div style={{ fontSize: 9, color: '#666', textTransform: 'uppercase', letterSpacing: 1 }}>{s.label}</div>
             </div>
           ))}
         </div>
 
-        {/* Exercise cards */}
-        {workout.map((group) => (
-          <div key={group.id} style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <div
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  background: group.color,
-                  boxShadow: `0 0 8px ${group.color}40`,
-                }}
-              />
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff' }}>
-                {group.label}
-              </h3>
+        {/* Hero recommendation */}
+        {bestExercise && (
+          <div style={styles.hero}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: '#ffb03b', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 12 }}>
+              ★ Best Overall Pick
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {group.exercises.map((ex, i) => (
-                <div key={i} style={{ ...styles.card, borderLeft: `3px solid ${group.color}` }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#eee' }}>{ex.name}</div>
-                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
-                      {ex.diff === 'Beg' ? 'Beginner' : ex.diff === 'Int' ? 'Intermediate' : 'Advanced'}
-                    </div>
-                  </div>
-                  <div style={styles.sets}>{ex.sets}</div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+              {bestExercise.gifUrl && (
+                <img
+                  src={bestExercise.gifUrl}
+                  alt={bestExercise.name}
+                  style={{ width: 88, height: 88, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,176,59,0.2)' }}
+                />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', textTransform: 'capitalize', marginBottom: 6 }}>
+                  {bestExercise.name}
                 </div>
-              ))}
+                {bestExercise.covered.length > 0 && (
+                  <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
+                    Covers · {bestExercise.covered.join(', ')}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(() => {
+                    const role = getExerciseRole(bestExercise, 0)
+                    const roleColor = ROLE_COLOR[role]
+                    const diff = classifyDifficulty(bestExercise)
+                    return <>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: roleColor, background: `${roleColor}18`, border: `1px solid ${roleColor}30`, borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: 1 }}>{role}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: DIFF_COLOR[diff], background: `${DIFF_COLOR[diff]}18`, border: `1px solid ${DIFF_COLOR[diff]}30`, borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: 1 }}>{diff}</span>
+                      {bestExercise.equipments?.[0] && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#666', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, padding: '2px 6px', textTransform: 'capitalize', letterSpacing: 1 }}>{bestExercise.equipments[0]}</span>
+                      )}
+                    </>
+                  })()}
+                </div>
+              </div>
+              <div style={{ ...styles.setsbadge, fontSize: 16, padding: '8px 14px', flexShrink: 0 }}>
+                {workoutType === 'calisthenics' ? assignCalisthenicsRepScheme(bestExercise, 0) : assignRepScheme(bestExercise, 0)}
+              </div>
             </div>
           </div>
-        ))}
+        )}
+
+        {/* Loading / error */}
+        {loading && (
+          <div style={styles.stateBox}>
+            <div style={styles.spinner} />
+            <span style={{ marginLeft: 12, color: '#555', fontSize: 13 }}>Fetching exercises…</span>
+          </div>
+        )}
+        {error && (
+          <div style={{ ...styles.stateBox, color: '#ff3b5c', fontSize: 13 }}>
+            Failed to load exercises: {error}
+          </div>
+        )}
+
+        {/* Controls */}
+        {!loading && !error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+            {/* Difficulty filter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={styles.controlLabel}>Difficulty</span>
+              {DIFF_FILTERS.map((f) => {
+                const active = diffFilter === f
+                const accent = f === 'All' ? '#ff7b3b' : DIFF_COLOR[f]
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setDiffFilter(f)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      border: `1px solid ${active ? accent + '50' : 'rgba(255,255,255,0.06)'}`,
+                      background: active ? accent + '15' : 'transparent',
+                      color: active ? accent : '#555',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {f}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Total exercise count */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+              <span style={styles.controlLabel}>Total exercises</span>
+              <button onClick={() => setTotal((t) => Math.max(1, t - 1))} style={styles.countBtn}>−</button>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ccc', minWidth: 16, textAlign: 'center' }}>
+                {total}
+              </span>
+              <button onClick={() => setTotal((t) => Math.min(50, t + 1))} style={styles.countBtn}>+</button>
+            </div>
+          </div>
+        )}
+
+        {/* Exercise cards */}
+        {!loading && !error && activeMuscleIds.map((id) => {
+          const config = EXERCISES[id]
+          const exercises = getExercises(id)
+          const slot = allocation[id]
+
+          return (
+            <div key={id} style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{ width: 12, height: 12, borderRadius: '50%', background: config.color, boxShadow: `0 0 8px ${config.color}40` }} />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff' }}>{config.label}</h3>
+                <span style={{ fontSize: 11, color: '#444' }}>{slot} slot{slot !== 1 ? 's' : ''}</span>
+              </div>
+
+              {exercises.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#444', padding: '8px 0' }}>
+                  No {diffFilter !== 'All' ? diffFilter.toLowerCase() + ' ' : ''}exercises found — try a different filter.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {exercises.map((ex, i) => {
+                    const diff = classifyDifficulty(ex)
+                    const scheme = workoutType === 'calisthenics' ? assignCalisthenicsRepScheme(ex, i) : assignRepScheme(ex, i)
+                    const role = getExerciseRole(ex, i)
+                    const roleColor = ROLE_COLOR[role]
+                    return (
+                      <div key={ex.exerciseId} style={{ ...styles.card, borderLeft: `3px solid ${config.color}` }}>
+                        {ex.gifUrl && (
+                          <img src={ex.gifUrl} alt={ex.name} style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#eee', textTransform: 'capitalize' }}>{ex.name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, color: roleColor,
+                              background: `${roleColor}18`, border: `1px solid ${roleColor}30`,
+                              borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: 1,
+                            }}>
+                              {role}
+                            </span>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, color: DIFF_COLOR[diff],
+                              background: `${DIFF_COLOR[diff]}18`, border: `1px solid ${DIFF_COLOR[diff]}30`,
+                              borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: 1,
+                            }}>
+                              {diff}
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                          <div style={styles.setsbadge}>{scheme}</div>
+                          {ex.equipments?.length > 0 && (
+                            <div style={styles.equipment}>{ex.equipments[0]}</div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
 
         {/* Tips */}
         <div style={styles.tips}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#ff7b3b', marginBottom: 8, letterSpacing: 1 }}>
             💡 TRAINING TIPS
           </div>
-          <div style={{ fontSize: 12, color: '#555', lineHeight: 2 }}>
-            Warm up 5-10 minutes before starting<br />
-            Rest 60-90s between hypertrophy sets<br />
-            Track your weights for progressive overload<br />
-            Train each muscle group 2× per week for optimal growth
-          </div>
+          {workoutType === 'calisthenics' ? (
+            <div style={{ fontSize: 12, color: '#555', lineHeight: 2 }}>
+              Master form before increasing reps or progressions<br />
+              Rest 60-90s between sets; shorter rest for endurance gains<br />
+              Progress via harder variations (e.g. archer → one-arm)<br />
+              Train each movement pattern 3× per week for skill development
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#555', lineHeight: 2 }}>
+              Warm up 5-10 minutes before starting<br />
+              Rest 60-90s between hypertrophy sets<br />
+              Track your weights for progressive overload<br />
+              Train each muscle group 2× per week for optimal growth
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -96,55 +405,51 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
 
 const styles = {
   backBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 14px',
-    background: 'rgba(255,255,255,0.06)',
-    border: 'none',
-    borderRadius: 8,
-    color: '#888',
-    fontSize: 12,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    marginBottom: 24,
+    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+    background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 8,
+    color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 24,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 900,
-    margin: '0 0 6px',
+    fontSize: 28, fontWeight: 900, margin: '0 0 6px',
     background: 'linear-gradient(135deg, #ff3b5c, #ff7b3b, #ffb03b)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
+    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
   },
-  subtitle: {
-    fontSize: 13,
-    color: '#555',
-    margin: '0 0 20px',
+  subtitle: { fontSize: 13, color: '#555', margin: '0 0 20px' },
+  controlLabel: { fontSize: 9, color: '#444', letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 700 },
+  countBtn: {
+    width: 24, height: 24, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.04)', color: '#888', fontSize: 14, lineHeight: 1,
+    cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   card: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    padding: '12px 16px',
-    borderRadius: 10,
-    background: 'rgba(255,255,255,0.02)',
-    border: '1px solid rgba(255,255,255,0.04)',
+    display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
+    borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
   },
-  sets: {
-    padding: '5px 12px',
-    borderRadius: 6,
-    background: 'rgba(255,255,255,0.04)',
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#bbb',
-    fontFamily: "'DM Mono', monospace",
+  hero: {
+    marginBottom: 28, padding: 20, borderRadius: 14,
+    background: 'linear-gradient(135deg, rgba(255,176,59,0.06), rgba(255,59,92,0.04))',
+    border: '1px solid rgba(255,176,59,0.18)',
+    boxShadow: '0 0 32px rgba(255,176,59,0.05)',
+  },
+  setsbadge: {
+    padding: '4px 10px', borderRadius: 6,
+    background: 'rgba(59,184,255,0.08)', border: '1px solid rgba(59,184,255,0.2)',
+    fontSize: 12, fontWeight: 800, color: '#3bb8ff',
+    fontFamily: "'DM Mono', monospace", whiteSpace: 'nowrap',
+  },
+  equipment: {
+    padding: '5px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.04)',
+    fontSize: 11, fontWeight: 700, color: '#bbb', fontFamily: "'DM Mono', monospace",
+    textTransform: 'capitalize', whiteSpace: 'nowrap', flexShrink: 0,
+  },
+  stateBox: { display: 'flex', alignItems: 'center', padding: '20px 0' },
+  spinner: {
+    width: 20, height: 20, border: '2px solid rgba(255,59,92,0.2)',
+    borderTop: '2px solid #ff3b5c', borderRadius: '50%',
+    animation: 'spin 1s linear infinite', flexShrink: 0,
   },
   tips: {
-    marginTop: 24,
-    padding: 20,
-    borderRadius: 12,
-    background: 'rgba(255,255,255,0.02)',
-    border: '1px solid rgba(255,255,255,0.04)',
+    marginTop: 24, padding: 20, borderRadius: 12,
+    background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
   },
 }
