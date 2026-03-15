@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Muscle Painter",
+    "slug": "muscle-painter",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "musclepainter",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#08080f"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.musclepainter.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#08080f",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "package": "com.musclepainter.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      [
+        "expo-asset",
+        {
+          "assets": ["./assets/male_base_muscular_anatomy.glb"]
+        }
+      ]
+    ]
+  }
+}
