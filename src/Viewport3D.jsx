@@ -258,7 +258,7 @@ const Viewport3D = forwardRef(function Viewport3D(
 
       {/* The body model + painting */}
       <BodyModel
-        modelPath="/male_base_muscular_anatomy.glb"
+        modelPath={`${import.meta.env.BASE_URL}male_base_muscular_anatomy.glb`}
         paintEngine={paintEngine}
         brushActive={brushActiveRef}
         onPaintStroke={onPaintStroke}
