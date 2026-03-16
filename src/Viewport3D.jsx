@@ -9,7 +9,7 @@ import { createPaintMaterial } from './paintShader'
  * Inner component that loads the GLB, sets up the paint shader,
  * and handles raycasting + painting on pointer events.
  */
-function BodyModel({ modelPath, paintEngine, brushActive, onPaintStroke }) {
+function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPaintStroke }) {
   const gltf = useGLTF(modelPath)
   const meshRef = useRef(null)
   const raycaster = useRef(new THREE.Raycaster())
@@ -47,9 +47,9 @@ function BodyModel({ modelPath, paintEngine, brushActive, onPaintStroke }) {
   // Throttle state updates so React re-renders don't happen on every mousemove
   const lastNotifyRef = useRef(0)
 
-  // Raycast paint helper
+  // Raycast and apply paint/erase with the given mode override
   const doPaint = useCallback(
-    (clientX, clientY) => {
+    (clientX, clientY, modeOverride) => {
       if (!meshRef.current) return
 
       const rect = gl.domElement.getBoundingClientRect()
@@ -60,7 +60,10 @@ function BodyModel({ modelPath, paintEngine, brushActive, onPaintStroke }) {
       const hits = raycaster.current.intersectObject(meshRef.current, false)
 
       if (hits.length > 0 && hits[0].uv) {
+        const prevMode = paintEngine.mode
+        if (modeOverride) paintEngine.mode = modeOverride
         paintEngine.paintAtUV(hits[0].uv, hits[0].point)
+        paintEngine.mode = prevMode
         // Only notify parent ~10×/sec to avoid re-rendering on every mousemove
         const now = Date.now()
         if (now - lastNotifyRef.current > 100) {
@@ -76,60 +79,124 @@ function BodyModel({ modelPath, paintEngine, brushActive, onPaintStroke }) {
   useEffect(() => {
     const canvas = gl.domElement
     let painting = false
+    let erasing = false
+    let lastX = null
+    let lastY = null
+
+    const doPaintInterpolated = (x, y, mode) => {
+      if (lastX === null) {
+        doPaint(x, y, mode)
+      } else {
+        const dx = x - lastX
+        const dy = y - lastY
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        // Step every ~4px so strokes stay solid even when dragging fast
+        const step = Math.max(4, paintEngine.brushSize * 0.15)
+        const steps = Math.max(1, Math.ceil(dist / step))
+        for (let i = 1; i <= steps; i++) {
+          doPaint(lastX + dx * (i / steps), lastY + dy * (i / steps), mode)
+        }
+      }
+      lastX = x
+      lastY = y
+    }
+
+    const resetStroke = () => { lastX = null; lastY = null }
+
+    // Capture-phase handler for right-click: runs before OrbitControls sees the event.
+    // If right-clicking on paint → disable right-orbit and erase instead.
+    // If right-clicking elsewhere → leave right-orbit enabled.
+    const onDownCapture = (e) => {
+      if (e.button !== 2) return
+      const controls = orbitControlsRef.current
+      if (!controls || !meshRef.current) return
+
+      const rect = canvas.getBoundingClientRect()
+      pointer.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.current.setFromCamera(pointer.current, camera)
+      const hits = raycaster.current.intersectObject(meshRef.current, false)
+
+      if (hits.length > 0) {
+        // On model — block orbit, handle as erase
+        controls.mouseButtons.RIGHT = null
+        erasing = true
+        doPaintInterpolated(e.clientX, e.clientY, 'erase')
+      } else {
+        // Off model — allow orbit
+        controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE
+      }
+    }
 
     const onDown = (e) => {
       // Only paint on left-click without modifier keys
       if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
       if (!brushActive.current) return
       painting = true
-      doPaint(e.clientX, e.clientY)
+      doPaintInterpolated(e.clientX, e.clientY, null)
     }
 
     const onMove = (e) => {
-      if (!painting || !brushActive.current) return
-      doPaint(e.clientX, e.clientY)
+      if (!brushActive.current) return
+      if (painting && e.buttons === 1) doPaintInterpolated(e.clientX, e.clientY, null)
+      if (erasing && e.buttons === 2) doPaintInterpolated(e.clientX, e.clientY, 'erase')
     }
 
-    const onUp = () => {
-      painting = false
+    const onUp = (e) => {
+      if (e.button === 0) { painting = false; resetStroke() }
+      if (e.button === 2) {
+        erasing = false
+        resetStroke()
+        // Restore right-click orbit
+        if (orbitControlsRef.current) orbitControlsRef.current.mouseButtons.RIGHT = THREE.MOUSE.ROTATE
+      }
     }
+
+    const onContextMenu = (e) => e.preventDefault()
 
     // Touch support
     const onTouchStart = (e) => {
       if (e.touches.length !== 1 || !brushActive.current) return
       painting = true
       const t = e.touches[0]
-      doPaint(t.clientX, t.clientY)
+      doPaintInterpolated(t.clientX, t.clientY, null)
     }
 
     const onTouchMove = (e) => {
       if (!painting || e.touches.length !== 1 || !brushActive.current) return
       const t = e.touches[0]
-      doPaint(t.clientX, t.clientY)
+      doPaintInterpolated(t.clientX, t.clientY, null)
     }
 
     const onTouchEnd = () => {
       painting = false
+      resetStroke()
     }
 
+    canvas.addEventListener('pointerdown', onDownCapture, { capture: true })
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
+    const onLeave = () => { painting = false; erasing = false; resetStroke() }
+
     canvas.addEventListener('pointerup', onUp)
-    canvas.addEventListener('pointerleave', onUp)
+    canvas.addEventListener('pointerleave', onLeave)
+    canvas.addEventListener('contextmenu', onContextMenu)
     canvas.addEventListener('touchstart', onTouchStart, { passive: true })
     canvas.addEventListener('touchmove', onTouchMove, { passive: true })
     canvas.addEventListener('touchend', onTouchEnd)
 
     return () => {
+      canvas.removeEventListener('pointerdown', onDownCapture, { capture: true })
       canvas.removeEventListener('pointerdown', onDown)
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', onUp)
-      canvas.removeEventListener('pointerleave', onUp)
+      canvas.removeEventListener('pointerleave', onLeave)
+      canvas.removeEventListener('contextmenu', onContextMenu)
       canvas.removeEventListener('touchstart', onTouchStart)
       canvas.removeEventListener('touchmove', onTouchMove)
       canvas.removeEventListener('touchend', onTouchEnd)
     }
-  }, [gl, doPaint, brushActive])
+  }, [gl, camera, doPaint, brushActive, orbitControlsRef, paintEngine])
 
   // Auto-center and scale
   useEffect(() => {
@@ -151,20 +218,18 @@ function BodyModel({ modelPath, paintEngine, brushActive, onPaintStroke }) {
 }
 
 /**
- * Configures orbit controls so left-drag orbits only when
- * Ctrl/right-click is held (otherwise left-drag paints).
+ * Configures orbit controls. Right-drag orbits by default; BodyModel's capture
+ * handler overrides this when right-clicking on paint.
  */
-function SmartOrbitControls({ brushActive }) {
-  const controlsRef = useRef()
+function SmartOrbitControls({ brushActive, controlsRef }) {
   const { gl } = useThree()
 
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
 
-    // By default, enable orbit on right mouse + middle mouse
     controls.mouseButtons = {
-      LEFT: null, // We'll toggle this dynamically
+      LEFT: null,
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.ROTATE,
     }
@@ -199,7 +264,7 @@ function SmartOrbitControls({ brushActive }) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [brushActive])
+  }, [brushActive, controlsRef])
 
   useFrame(() => {
     controlsRef.current?.update()
@@ -218,6 +283,7 @@ const Viewport3D = forwardRef(function Viewport3D(
 ) {
   const paintEngineRef = useRef(null)
   const brushActiveRef = useRef(true)
+  const orbitControlsRef = useRef(null)
 
   // Create paint engine once
   if (!paintEngineRef.current) {
@@ -261,11 +327,12 @@ const Viewport3D = forwardRef(function Viewport3D(
         modelPath={`${import.meta.env.BASE_URL}male_base_muscular_anatomy.glb`}
         paintEngine={paintEngine}
         brushActive={brushActiveRef}
+        orbitControlsRef={orbitControlsRef}
         onPaintStroke={onPaintStroke}
       />
 
-      {/* Orbit: right-drag or Ctrl+left-drag */}
-      <SmartOrbitControls brushActive={brushActiveRef} />
+      {/* Orbit: right-drag (unpainted areas) or Ctrl+left-drag */}
+      <SmartOrbitControls brushActive={brushActiveRef} controlsRef={orbitControlsRef} />
     </Canvas>
   )
 })

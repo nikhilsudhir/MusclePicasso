@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { EXERCISES, EFFECTIVE_FOR, fetchMuscleExercises, classifyDifficulty, assignRepScheme, assignCalisthenicsRepScheme, getExerciseRole } from './exercises'
+import { Button } from './components/ui/button'
+import { Dialog, DialogClose } from './components/ui/dialog'
+import { cn } from './lib/utils'
 
 const DIFF_COLOR = { Beginner: '#3bff8a', Intermediate: '#ffb03b', Advanced: '#ff3b5c' }
 const ROLE_COLOR = { 'Main Lift': '#ff3b5c', 'Accessory': '#ff7b3b', 'Isolation': '#3bb8ff' }
@@ -115,6 +118,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
   const [workoutType, setWorkoutType] = useState('weights') // 'weights' | 'calisthenics'
   const [diffFilter, setDiffFilter] = useState('All')
   const [total, setTotal] = useState(DEFAULT_TOTAL)
+  const [selectedEx, setSelectedEx] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -163,14 +167,15 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
   const totalShown = activeMuscleIds.reduce((sum, id) => sum + getExercises(id).length, 0)
 
   return (
+    <>
     <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
       <div style={{ maxWidth: 700, margin: '0 auto' }}>
-        <button onClick={onBack} style={styles.backBtn}>
+        <Button variant="ghost" size="sm" onClick={onBack} className="mb-6 text-muted-foreground -ml-1">
           ← Back to Model
-        </button>
+        </Button>
 
         {/* Mode toggle */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 20, padding: 4, background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', width: 'fit-content' }}>
+        <div className="flex gap-1 mb-5 p-1 rounded-lg w-fit" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
           {[
             { key: 'weights',      label: '🏋️ Weights',      accent: '#ff3b5c' },
             { key: 'calisthenics', label: '🤸 Calisthenics',  accent: '#3bff8a' },
@@ -178,13 +183,13 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
             <button
               key={key}
               onClick={() => setWorkoutType(key)}
+              className={cn(
+                'px-4 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer border-0 font-[inherit]',
+                workoutType === key ? 'bg-white/5' : 'bg-transparent hover:bg-white/3'
+              )}
               style={{
-                padding: '7px 16px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-                background: workoutType === key ? accent + '20' : 'transparent',
                 color: workoutType === key ? accent : '#555',
                 outline: workoutType === key ? `1px solid ${accent}40` : 'none',
-                transition: 'all 0.15s',
               }}
             >
               {label}
@@ -214,7 +219,16 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
 
         {/* Hero recommendation */}
         {bestExercise && (
-          <div style={styles.hero}>
+          <div
+            style={{ ...styles.hero, cursor: 'pointer' }}
+            onClick={() => {
+              const role = getExerciseRole(bestExercise, 0)
+              const diff = classifyDifficulty(bestExercise)
+              const scheme = workoutType === 'calisthenics' ? assignCalisthenicsRepScheme(bestExercise, 0) : assignRepScheme(bestExercise, 0)
+              const config = EXERCISES[bestExercise.muscleId] ?? { label: 'Overall', color: '#ffb03b' }
+              setSelectedEx({ ex: bestExercise, diff, scheme, role, roleColor: ROLE_COLOR[role], config })
+            }}
+          >
             <div style={{ fontSize: 9, fontWeight: 700, color: '#ffb03b', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 12 }}>
               ★ Best Overall Pick
             </div>
@@ -274,41 +288,38 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
         {!loading && !error && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
             {/* Difficulty filter */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="flex items-center gap-1.5">
               <span style={styles.controlLabel}>Difficulty</span>
               {DIFF_FILTERS.map((f) => {
                 const active = diffFilter === f
                 const accent = f === 'All' ? '#ff7b3b' : DIFF_COLOR[f]
                 return (
-                  <button
+                  <Button
                     key={f}
+                    size="sm"
+                    variant="ghost"
                     onClick={() => setDiffFilter(f)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 6,
-                      border: `1px solid ${active ? accent + '50' : 'rgba(255,255,255,0.06)'}`,
-                      background: active ? accent + '15' : 'transparent',
-                      color: active ? accent : '#555',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
+                    className="text-[10px] h-6 px-2.5 font-semibold transition-colors"
+                    style={active ? {
+                      color: accent,
+                      background: accent + '15',
+                      border: `1px solid ${accent}50`,
+                    } : { color: '#555' }}
                   >
                     {f}
-                  </button>
+                  </Button>
                 )
               })}
             </div>
 
             {/* Total exercise count */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+            <div className="flex items-center gap-2 ml-auto">
               <span style={styles.controlLabel}>Total exercises</span>
-              <button onClick={() => setTotal((t) => Math.max(1, t - 1))} style={styles.countBtn}>−</button>
+              <Button variant="outline" size="icon" onClick={() => setTotal((t) => Math.max(1, t - 1))}>−</Button>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ccc', minWidth: 16, textAlign: 'center' }}>
                 {total}
               </span>
-              <button onClick={() => setTotal((t) => Math.min(50, t + 1))} style={styles.countBtn}>+</button>
+              <Button variant="outline" size="icon" onClick={() => setTotal((t) => Math.min(50, t + 1))}>+</Button>
             </div>
           </div>
         )}
@@ -339,7 +350,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
                     const role = getExerciseRole(ex, i)
                     const roleColor = ROLE_COLOR[role]
                     return (
-                      <div key={ex.exerciseId} style={{ ...styles.card, borderLeft: `3px solid ${config.color}` }}>
+                      <div key={ex.exerciseId} onClick={() => setSelectedEx({ ex, diff, scheme, role, roleColor, config })} style={{ ...styles.card, borderLeft: `3px solid ${config.color}`, cursor: 'pointer' }}>
                         {ex.gifUrl && (
                           <img src={ex.gifUrl} alt={ex.name} style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
                         )}
@@ -400,6 +411,83 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
         </div>
       </div>
     </div>
+
+    {/* Exercise detail popout */}
+    <Dialog open={!!selectedEx} onClose={() => setSelectedEx(null)}>
+      {selectedEx && <ExerciseDetail {...selectedEx} onClose={() => setSelectedEx(null)} />}
+    </Dialog>
+    </>
+  )
+}
+
+function ExerciseDetail({ ex, diff, scheme, role, roleColor, config, onClose }) {
+  return (
+    <>
+      <DialogClose onClose={onClose} />
+
+      {/* GIF header */}
+      {ex.gifUrl && (
+        <div style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <img
+            src={ex.gifUrl}
+            alt={ex.name}
+            style={{ width: '100%', height: 220, objectFit: 'contain', display: 'block' }}
+          />
+        </div>
+      )}
+
+      <div style={{ padding: '20px 20px 24px' }}>
+        {/* Name + scheme */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#fff', textTransform: 'capitalize', lineHeight: 1.3 }}>
+            {ex.name}
+          </h2>
+          <div style={{ ...styles.setsbadge, flexShrink: 0 }}>{scheme}</div>
+        </div>
+
+        {/* Badges */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: roleColor, background: `${roleColor}18`, border: `1px solid ${roleColor}30`, borderRadius: 4, padding: '3px 8px', textTransform: 'uppercase', letterSpacing: 1 }}>
+            {role}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: DIFF_COLOR[diff], background: `${DIFF_COLOR[diff]}18`, border: `1px solid ${DIFF_COLOR[diff]}30`, borderRadius: 4, padding: '3px 8px', textTransform: 'uppercase', letterSpacing: 1 }}>
+            {diff}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: config.color, background: `${config.color}15`, border: `1px solid ${config.color}30`, borderRadius: 4, padding: '3px 8px', textTransform: 'capitalize', letterSpacing: 0.5 }}>
+            {config.label}
+          </span>
+        </div>
+
+        {/* Details grid */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {ex.targetMuscles?.length > 0 && (
+            <DetailRow label="Target" value={ex.targetMuscles.join(', ')} />
+          )}
+          {ex.secondaryMuscles?.length > 0 && (
+            <DetailRow label="Secondary" value={ex.secondaryMuscles.join(', ')} />
+          )}
+          {ex.equipments?.length > 0 && (
+            <DetailRow label="Equipment" value={ex.equipments.join(', ')} />
+          )}
+          {ex.bodyParts?.length > 0 && (
+            <DetailRow label="Body Part" value={ex.bodyParts.join(', ')} />
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', gap: 12 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#444', textTransform: 'uppercase', letterSpacing: '1.5px', minWidth: 80, paddingTop: 1 }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 13, color: '#888', textTransform: 'capitalize', lineHeight: 1.5 }}>
+        {value}
+      </span>
+    </div>
   )
 }
 
@@ -414,8 +502,8 @@ const styles = {
     background: 'linear-gradient(135deg, #ff3b5c, #ff7b3b, #ffb03b)',
     WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
   },
-  subtitle: { fontSize: 13, color: '#555', margin: '0 0 20px' },
-  controlLabel: { fontSize: 9, color: '#444', letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 700 },
+  subtitle: { fontSize: 15, color: '#555', margin: '0 0 20px' },
+  controlLabel: { fontSize: 13, color: '#444', letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 700 },
   countBtn: {
     width: 24, height: 24, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)',
     background: 'rgba(255,255,255,0.04)', color: '#888', fontSize: 14, lineHeight: 1,

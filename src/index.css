@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS variables tuned to match the existing #08080f dark theme */
+@layer base {
+  :root {
+    --background: 237 47% 4%;
+    --foreground: 240 5% 85%;
+    --primary: 348 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 237 20% 9%;
+    --secondary-foreground: 240 5% 65%;
+    --muted: 237 20% 8%;
+    --muted-foreground: 237 5% 32%;
+    --accent: 237 20% 12%;
+    --accent-foreground: 240 5% 85%;
+    --border: 237 20% 11%;
+    --input: 237 20% 11%;
+    --ring: 348 100% 60%;
+    --radius: 0.5rem;
+  }
+}

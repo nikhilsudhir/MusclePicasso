@@ -21,10 +21,17 @@ export class PaintEngine {
     this.brushSize = 30
     this.mode = 'add' // 'add' | 'erase'
     this._detectedMuscles = new Set()
+    this._muscleUVs = {} // muscleId -> [{x, y}] UV samples painted for that muscle
   }
 
   get detectedMuscles() {
     return this._detectedMuscles
+  }
+
+  hasPaintAtUV(uv) {
+    const px = Math.min(2047, Math.floor(uv.x * 2048))
+    const py = Math.min(2047, Math.floor(uv.y * 2048))
+    return this.ctx.getImageData(px, py, 1, 1).data[3] > 10
   }
 
   /**
@@ -46,6 +53,7 @@ export class PaintEngine {
       ctx.arc(x, y, this.brushSize * 1.5, 0, Math.PI * 2)
       ctx.fill()
       ctx.restore()
+      this._recomputeDetectedMuscles()
     } else {
       ctx.save()
       ctx.globalCompositeOperation = 'source-over'
@@ -61,7 +69,11 @@ export class PaintEngine {
 
       if (worldPoint) {
         const muscle = detectMuscleFromPoint(worldPoint)
-        if (muscle) this._detectedMuscles.add(muscle)
+        if (muscle) {
+          this._detectedMuscles.add(muscle)
+          if (!this._muscleUVs[muscle]) this._muscleUVs[muscle] = []
+          this._muscleUVs[muscle].push({ x: uv.x, y: uv.y })
+        }
       }
     }
 
@@ -75,6 +87,28 @@ export class PaintEngine {
     this.ctx.clearRect(0, 0, 2048, 2048)
     this.texture.needsUpdate = true
     this._detectedMuscles = new Set()
+    this._muscleUVs = {}
+  }
+
+  /**
+   * Re-derive the detected set by sampling the canvas at the UV coordinates
+   * that were painted for each muscle. A muscle is removed when all of its
+   * stored UV samples have been fully erased (alpha < 10).
+   */
+  _recomputeDetectedMuscles() {
+    const newDetected = new Set()
+    for (const [muscle, uvs] of Object.entries(this._muscleUVs)) {
+      for (const uv of uvs) {
+        const px = Math.min(2047, Math.floor(uv.x * 2048))
+        const py = Math.min(2047, Math.floor(uv.y * 2048))
+        const pixel = this.ctx.getImageData(px, py, 1, 1).data
+        if (pixel[3] > 10) {
+          newDetected.add(muscle)
+          break
+        }
+      }
+    }
+    this._detectedMuscles = newDetected
   }
 }
 
@@ -119,13 +153,13 @@ function detectMuscleFromPoint(point) {
   if (y > 1.22 && y < 1.48 && z > 0.08) return 'lower_chest'
 
   // Lats — outer/lateral back sweep
-  if (y > 1.05 && y < 1.6 && z < -0.03 && absX > 0.13) return 'lats'
+  if (y > 1.2 && y < 1.6 && z < -0.03 && absX > 0.13) return 'lats'
 
   // Mid Back — rhomboids / central upper back
   if (y > 1.3 && y < 1.65 && z < -0.05) return 'mid_back'
 
   // Lower Back — erector spinae / lumbar
-  if (y > 1.0 && y < 1.3 && z < -0.05) return 'lower_back'
+  if (y > 1.15 && y < 1.3 && z < -0.05) return 'lower_back'
 
   // Obliques — lateral sides of torso (checked before abs)
   if (y > 1.0 && y < 1.38 && absX > 0.12 && z > -0.03) return 'obliques'

@@ -2,6 +2,9 @@ import { useState, useRef, useCallback, Suspense } from 'react'
 import Viewport3D from './Viewport3D'
 import WorkoutPanel from './WorkoutPanel'
 import { EXERCISES } from './exercises'
+import { Button } from './components/ui/button'
+import { Slider } from './components/ui/slider'
+import { cn } from './lib/utils'
 
 export default function App() {
   const viewportRef = useRef(null)
@@ -37,18 +40,13 @@ export default function App() {
           </div>
         </div>
         {paintedMuscles.size > 0 && (
-          <button
+          <Button
+            size="sm"
+            variant={showWorkout ? 'outline' : 'default'}
             onClick={() => setShowWorkout(!showWorkout)}
-            style={{
-              ...styles.headerBtn,
-              background: showWorkout
-                ? 'rgba(255,255,255,0.08)'
-                : 'linear-gradient(135deg, #ff3b5c, #ff7b3b)',
-              boxShadow: showWorkout ? 'none' : '0 2px 12px rgba(255,59,92,0.3)',
-            }}
           >
             {showWorkout ? '← Back to Model' : `View Workout (${paintedMuscles.size})`}
-          </button>
+          </Button>
         )}
       </header>
 
@@ -80,18 +78,18 @@ export default function App() {
           <Section label="Brush Mode">
             <div style={{ display: 'flex', gap: 4 }}>
               {[
-                { key: 'add', label: '🖌️ Paint', accent: '#ff3b5c' },
-                { key: 'erase', label: '🧹 Erase', accent: '#3bb8ff' },
+                { key: 'add', label: '🖌️ Paint' },
+                { key: 'erase', label: '🧹 Erase' },
               ].map((m) => (
                 <button
                   key={m.key}
                   onClick={() => setPaintMode(m.key)}
-                  style={{
-                    ...styles.toggleBtn,
-                    borderColor: paintMode === m.key ? m.accent + '40' : 'rgba(255,255,255,0.06)',
-                    background: paintMode === m.key ? m.accent + '12' : 'rgba(255,255,255,0.02)',
-                    color: paintMode === m.key ? m.accent : '#666',
-                  }}
+                  className={cn(
+                    'flex-1 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer',
+                    paintMode === m.key
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
+                  )}
                 >
                   {m.label}
                 </button>
@@ -101,13 +99,11 @@ export default function App() {
 
           {/* Brush Size */}
           <Section label={`Brush Size: ${brushSize}`}>
-            <input
-              type="range"
-              min="10"
-              max="80"
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              style={styles.slider}
+            <Slider
+              min={10}
+              max={80}
+              value={[brushSize]}
+              onValueChange={([v]) => setBrushSize(v)}
             />
           </Section>
 
@@ -130,13 +126,13 @@ export default function App() {
 
           {/* Actions */}
           {paintedMuscles.size > 0 && (
-            <button onClick={() => setShowWorkout(true)} style={styles.generateBtn}>
+            <Button onClick={() => setShowWorkout(true)} className="w-full" size="sm">
               Generate Workout →
-            </button>
+            </Button>
           )}
-          <button onClick={handleClear} style={styles.clearBtn}>
+          <Button variant="ghost" size="sm" onClick={handleClear} className="w-full text-muted-foreground">
             Clear All Paint
-          </button>
+          </Button>
         </div>
 
         {/* Workout panel */}
@@ -209,7 +205,7 @@ const styles = {
     boxShadow: '0 2px 12px rgba(255,59,92,0.3)',
   },
   logoTitle: { margin: 0, fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px' },
-  logoSub: { margin: 0, fontSize: 9, color: '#444', letterSpacing: '1.5px', textTransform: 'uppercase' },
+  logoSub: { margin: 0, fontSize: 11, color: '#444', letterSpacing: '1.5px', textTransform: 'uppercase' },
   headerBtn: {
     padding: '7px 16px',
     borderRadius: 8,
@@ -258,7 +254,7 @@ const styles = {
     flexShrink: 0,
   },
   sectionLabel: {
-    fontSize: 9,
+    fontSize: 11,
     color: '#444',
     letterSpacing: '2px',
     textTransform: 'uppercase',
