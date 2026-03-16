@@ -18,6 +18,41 @@ const HEVY_MUSCLE = {
   calves:       'calves',
 }
 
+// exercisedb equipment name → Hevy equipment_category
+const HEVY_EQUIPMENT = {
+  'barbell':          'barbell',
+  'olympic barbell':  'barbell',
+  'ez barbell':       'barbell',
+  'trap bar':         'barbell',
+  'dumbbell':         'dumbbell',
+  'kettlebell':       'kettlebell',
+  'cable':            'machine',
+  'leverage machine': 'machine',
+  'smith machine':    'machine',
+  'sled machine':     'machine',
+  'resistance band':  'resistance_band',
+  'band':             'resistance_band',
+  'suspension':       'suspension',
+  'body weight':      'none',
+  'assisted':         'none',
+}
+
+function mapEquipment(equipments = []) {
+  for (const e of equipments) {
+    const key = e.toLowerCase()
+    for (const [k, v] of Object.entries(HEVY_EQUIPMENT)) {
+      if (key.includes(k)) return v
+    }
+  }
+  return 'other'
+}
+
+function mapExerciseType(equipments = []) {
+  const eq = equipments.map(e => e.toLowerCase()).join(' ')
+  if (eq.includes('body weight') || eq.includes('assisted') || eq.includes('suspension')) return 'bodyweight_reps'
+  return 'weight_reps'
+}
+
 async function hevyFetch(path, apiKey, options = {}) {
   const res = await fetch(`${HEVY_BASE}${path}`, {
     ...options,
@@ -53,6 +88,24 @@ export async function fetchHevyUser(apiKey) {
   return hevyFetch('/v1/user/info', apiKey)
 }
 
+async function createHevyExerciseTemplate(apiKey, ex, apiMuscle) {
+  const body = {
+    exercise: {
+      title: ex.name,
+      exercise_type: mapExerciseType(ex.equipments),
+      equipment_category: mapEquipment(ex.equipments),
+      muscle_group: HEVY_MUSCLE[apiMuscle?.toLowerCase()] ?? 'other',
+      other_muscles: [],
+    },
+  }
+  const data = await hevyFetch('/v1/exercise_templates', apiKey, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  // API returns { id: "..." } or the full template object
+  return data.id ?? data.exercise_template?.id ?? data.exercise?.id
+}
+
 export async function createHevyRoutine(apiKey, routine) {
   return hevyFetch('/v1/routines', apiKey, {
     method: 'POST',
@@ -60,38 +113,39 @@ export async function createHevyRoutine(apiKey, routine) {
   })
 }
 
-// Normalize a name for fuzzy matching: lowercase, strip equipment words + punctuation
+// Exact match only: normalize both titles and check equality.
+// Returns the template if found, null otherwise.
 function normalize(name) {
   return name
     .toLowerCase()
     .replace(/\([^)]*\)/g, '')
-    .replace(/\b(barbell|dumbbell|cable|machine|kettlebell|smith|bodyweight|body weight|weighted|leverage|ez|olympic|trap bar)\b/g, '')
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
-function nameSimilarity(a, b) {
-  const wa = normalize(a).split(' ').filter(Boolean)
-  const wb = new Set(normalize(b).split(' ').filter(Boolean))
-  if (!wa.length || !wb.size) return 0
-  return wa.filter(w => wb.has(w)).length / Math.max(wa.length, wb.size)
+function findExactTemplate(exerciseName, templates) {
+  const target = normalize(exerciseName)
+  return templates.find(t => normalize(t.title) === target) ?? null
 }
 
-export function matchHevyExercise(exerciseName, apiMuscle, templates) {
-  const hevyMuscle = HEVY_MUSCLE[apiMuscle?.toLowerCase()] ?? null
-  const pool = hevyMuscle
-    ? templates.filter(t => t.primary_muscle_group === hevyMuscle)
-    : templates
-  const candidates = pool.length > 0 ? pool : templates
+/**
+ * Resolve a Hevy exercise_template_id for the given exercise.
+ * Uses an exact name match against existing templates; if none found,
+ * creates a custom template with the exact exercise name and metadata.
+ * The `created` map is a local cache { normalizedName → id } to avoid
+ * duplicate creates within a single send operation.
+ */
+export async function resolveHevyTemplateId(apiKey, ex, apiMuscle, templates, created) {
+  const existing = findExactTemplate(ex.name, templates)
+  if (existing) return existing.id
 
-  let best = candidates[0] ?? null
-  let bestScore = -1
-  for (const t of candidates) {
-    const score = nameSimilarity(exerciseName, t.title)
-    if (score > bestScore) { bestScore = score; best = t }
-  }
-  return best
+  const key = normalize(ex.name)
+  if (created[key]) return created[key]
+
+  const id = await createHevyExerciseTemplate(apiKey, ex, apiMuscle)
+  created[key] = id
+  return id
 }
 
 function parseScheme(scheme) {

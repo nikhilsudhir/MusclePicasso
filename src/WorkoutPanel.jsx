@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { EXERCISES, EFFECTIVE_FOR, fetchMuscleExercises, classifyDifficulty, assignRepScheme, assignCalisthenicsRepScheme, getExerciseRole } from './exercises'
-import { fetchAllHevyTemplates, fetchHevyUser, createHevyRoutine, matchHevyExercise, buildHevyRoutine } from './hevy'
+import { fetchAllHevyTemplates, fetchHevyUser, resolveHevyTemplateId, createHevyRoutine, buildHevyRoutine } from './hevy'
 import { Button } from './components/ui/button'
 import { Dialog, DialogClose } from './components/ui/dialog'
 import { cn } from './lib/utils'
@@ -486,13 +486,14 @@ function HevySync({ exerciseList, workoutType }) {
     setSendErr('')
     try {
       const templates = await fetchAllHevyTemplates(key)
-      const items = exerciseList
-        .map(({ ex, apiMuscle, scheme }) => ({
-          templateId: matchHevyExercise(ex.name, apiMuscle, templates)?.id,
+      const created = {}
+      const items = await Promise.all(
+        exerciseList.map(async ({ ex, apiMuscle, scheme }) => ({
+          templateId: await resolveHevyTemplateId(key, ex, apiMuscle, templates, created),
           scheme,
         }))
-        .filter((item) => item.templateId)
-      const routine = buildHevyRoutine(items, workoutType, `Muscle Picasso — ${new Date().toLocaleDateString()}`)
+      )
+      const routine = buildHevyRoutine(items.filter(i => i.templateId), workoutType, `Muscle Picasso — ${new Date().toLocaleDateString()}`)
       await createHevyRoutine(key, routine)
       setSendStatus('success')
     } catch (err) {
