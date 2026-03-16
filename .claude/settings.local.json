@@ -11,7 +11,10 @@
       "Bash(npx expo:*)",
       "Bash(/Users/nikhilsudhir/Documents/GitHub/musclePainterProject/mobile/.gitignore:*)",
       "Bash(npx vite:*)",
-      "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(Object.keys\\({...p.dependencies,...p.devDependencies}\\).join\\(''\\\\n''\\)\\)\")"
+      "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(Object.keys\\({...p.dependencies,...p.devDependencies}\\).join\\(''\\\\n''\\)\\)\")",
+      "Bash(npm run:*)",
+      "WebFetch(domain:api.hevyapp.com)",
+      "WebSearch"
     ]
   }
 }

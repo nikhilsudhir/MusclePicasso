@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { EXERCISES, EFFECTIVE_FOR, fetchMuscleExercises, classifyDifficulty, assignRepScheme, assignCalisthenicsRepScheme, getExerciseRole } from './exercises'
+import { fetchAllHevyTemplates, fetchHevyUser, createHevyRoutine, matchHevyExercise, buildHevyRoutine } from './hevy'
 import { Button } from './components/ui/button'
 import { Dialog, DialogClose } from './components/ui/dialog'
 import { cn } from './lib/utils'
@@ -166,6 +167,17 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
 
   const totalShown = activeMuscleIds.reduce((sum, id) => sum + getExercises(id).length, 0)
 
+  // Flat list of all displayed exercises for Hevy export
+  const hevyExerciseList = !loading && !error
+    ? activeMuscleIds.flatMap((id) =>
+        getExercises(id).map((ex, i) => ({
+          ex,
+          apiMuscle: EXERCISES[id]?.apiMuscle,
+          scheme: workoutType === 'calisthenics' ? assignCalisthenicsRepScheme(ex, i) : assignRepScheme(ex, i),
+        }))
+      )
+    : []
+
   return (
     <>
     <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
@@ -216,6 +228,11 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
             </div>
           ))}
         </div>
+
+        {/* Hevy sync */}
+        {!loading && !error && hevyExerciseList.length > 0 && (
+          <HevySync exerciseList={hevyExerciseList} workoutType={workoutType} />
+        )}
 
         {/* Hero recommendation */}
         {bestExercise && (
@@ -417,6 +434,178 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
       {selectedEx && <ExerciseDetail {...selectedEx} onClose={() => setSelectedEx(null)} />}
     </Dialog>
     </>
+  )
+}
+
+function HevySync({ exerciseList, workoutType }) {
+  const [savedKey]    = useState(() => localStorage.getItem('hevy_api_key') || '')
+  const [username, setUsername] = useState(() => localStorage.getItem('hevy_username') || '')
+  const connected = !!(savedKey && username)
+
+  // Connect dialog state
+  const [showConnect, setShowConnect] = useState(false)
+  const [inputKey, setInputKey]       = useState('')
+  const [connecting, setConnecting]   = useState(false)
+  const [connectErr, setConnectErr]   = useState('')
+
+  // Send state
+  const [sendStatus, setSendStatus]   = useState('idle') // idle | loading | success | error
+  const [sendErr, setSendErr]         = useState('')
+
+  async function handleConnect() {
+    const key = inputKey.trim()
+    if (!key) return
+    setConnecting(true)
+    setConnectErr('')
+    try {
+      const user = await fetchHevyUser(key)
+      const name = user.user?.username ?? user.username ?? 'your account'
+      localStorage.setItem('hevy_api_key', key)
+      localStorage.setItem('hevy_username', name)
+      setUsername(name)
+      setShowConnect(false)
+      setInputKey('')
+    } catch (err) {
+      setConnectErr(err.message.includes('401') ? 'Invalid API key' : `Error: ${err.message}`)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  function handleDisconnect() {
+    localStorage.removeItem('hevy_api_key')
+    localStorage.removeItem('hevy_username')
+    setUsername('')
+    setSendStatus('idle')
+  }
+
+  async function handleSend() {
+    const key = localStorage.getItem('hevy_api_key')
+    if (!key) return
+    setSendStatus('loading')
+    setSendErr('')
+    try {
+      const templates = await fetchAllHevyTemplates(key)
+      const items = exerciseList
+        .map(({ ex, apiMuscle, scheme }) => ({
+          templateId: matchHevyExercise(ex.name, apiMuscle, templates)?.id,
+          scheme,
+        }))
+        .filter((item) => item.templateId)
+      const routine = buildHevyRoutine(items, workoutType, `Muscle Picasso — ${new Date().toLocaleDateString()}`)
+      await createHevyRoutine(key, routine)
+      setSendStatus('success')
+    } catch (err) {
+      setSendErr(err.message.includes('401') ? 'Session expired — reconnect' : err.message)
+      setSendStatus('error')
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {/* Connect dialog */}
+      {showConnect && (
+        <div style={{
+          marginBottom: 10, padding: '14px 16px', borderRadius: 10,
+          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#ccc', marginBottom: 10 }}>
+            Connect your Hevy account
+          </div>
+          <div style={{ fontSize: 11, color: '#555', marginBottom: 10, lineHeight: 1.6 }}>
+            Paste your API key from{' '}
+            <a href="https://hevy.com/settings?developer" target="_blank" rel="noreferrer"
+              style={{ color: '#3bb8ff', textDecoration: 'none' }}>
+              hevy.com/settings?developer
+            </a>
+            {' '}(requires Hevy Pro).
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="password"
+              placeholder="Paste API key…"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              autoFocus
+              style={{
+                flex: 1, padding: '6px 10px', borderRadius: 7,
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#ccc', fontSize: 12, fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+            <Button size="sm" onClick={handleConnect} disabled={connecting || !inputKey.trim()}>
+              {connecting ? 'Connecting…' : 'Connect'}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setShowConnect(false); setConnectErr('') }}>
+              Cancel
+            </Button>
+          </div>
+          {connectErr && (
+            <div style={{ fontSize: 11, color: '#ff3b5c', marginTop: 6 }}>{connectErr}</div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {connected ? (
+          <>
+            {/* Account pill */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 10px', borderRadius: 20,
+              background: 'rgba(59,255,138,0.06)', border: '1px solid rgba(59,255,138,0.15)',
+            }}>
+              <img src="https://hevy.com/favicon.ico" alt="" style={{ width: 12, height: 12, borderRadius: 2, opacity: 0.8 }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#3bff8a' }}>@{username}</span>
+              <button
+                onClick={handleDisconnect}
+                style={{ background: 'none', border: 'none', color: '#555', fontSize: 11, cursor: 'pointer', padding: 0, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Send button */}
+            <button
+              onClick={sendStatus !== 'success' ? handleSend : undefined}
+              disabled={sendStatus === 'loading'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: sendStatus === 'success' ? 'rgba(59,255,138,0.08)' : 'rgba(255,255,255,0.03)',
+                color: sendStatus === 'success' ? '#3bff8a' : sendStatus === 'loading' ? '#555' : '#aaa',
+                fontSize: 12, fontWeight: 600,
+                cursor: sendStatus === 'loading' || sendStatus === 'success' ? 'default' : 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.2s',
+              }}
+            >
+              {sendStatus === 'loading' ? 'Sending…' : sendStatus === 'success' ? '✓ Added to Hevy' : 'Add routine to Hevy'}
+            </button>
+
+            {sendStatus === 'error' && (
+              <span style={{ fontSize: 11, color: '#ff3b5c' }}>{sendErr}</span>
+            )}
+          </>
+        ) : (
+          <button
+            onClick={() => setShowConnect(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.03)',
+              color: '#888', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <img src="https://hevy.com/favicon.ico" alt="" style={{ width: 13, height: 13, borderRadius: 2, opacity: 0.7 }} />
+            Connect Hevy account
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
