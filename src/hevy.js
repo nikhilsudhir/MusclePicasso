@@ -68,7 +68,8 @@ async function hevyFetch(path, apiKey, options = {}) {
     try { const j = JSON.parse(text); msg = j.message ?? j.error ?? msg } catch {}
     throw new Error(msg)
   }
-  return res.json()
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { return text }
 }
 
 export async function fetchAllHevyTemplates(apiKey) {
@@ -102,8 +103,11 @@ async function createHevyExerciseTemplate(apiKey, ex, apiMuscle) {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  // API returns { id: "..." } or the full template object
-  return data.id ?? data.exercise_template?.id ?? data.exercise?.id
+  // Hevy returns a plain UUID string or an object with an id field
+  const id = typeof data === 'string' ? data.trim()
+    : (data.id ?? data.exercise_template?.id ?? data.exercise?.id ?? data.data?.id)
+  if (!id) throw new Error(`No ID in response for "${ex.name}": ${JSON.stringify(data)}`)
+  return id
 }
 
 export async function createHevyRoutine(apiKey, routine) {
@@ -113,39 +117,70 @@ export async function createHevyRoutine(apiKey, routine) {
   })
 }
 
-// Exact match only: normalize both titles and check equality.
-// Returns the template if found, null otherwise.
+// Strip equipment qualifiers and punctuation for comparison.
+// "Barbell Bench Press" and "Bench Press (Barbell)" both become "bench press".
 function normalize(name) {
   return name
     .toLowerCase()
     .replace(/\([^)]*\)/g, '')
+    .replace(/\b(barbell|dumbbell|cable|machine|kettlebell|smith|bodyweight|body weight|weighted|leverage|ez|olympic|trap bar|resistance band)\b/g, '')
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
-function findExactTemplate(exerciseName, templates) {
+function wordOverlap(a, b) {
+  const wa = new Set(normalize(a).split(' ').filter(Boolean))
+  const wb = new Set(normalize(b).split(' ').filter(Boolean))
+  if (!wa.size || !wb.size) return 0
+  let shared = 0
+  for (const w of wa) if (wb.has(w)) shared++
+  return shared / Math.max(wa.size, wb.size)
+}
+
+/**
+ * Find a matching Hevy template for the given exercise name.
+ * Pass 1: exact normalized name match across all templates.
+ * Pass 2: best word-overlap match (≥ 0.55) within the same muscle group.
+ * Returns null only if no suitable match exists.
+ */
+function findMatchingTemplate(exerciseName, apiMuscle, templates) {
+  // Pass 1 — exact
   const target = normalize(exerciseName)
-  return templates.find(t => normalize(t.title) === target) ?? null
+  const exact = templates.find(t => normalize(t.title) === target)
+  if (exact) return exact
+
+  // Pass 2 — word overlap within muscle group
+  const hevyMuscle = HEVY_MUSCLE[apiMuscle?.toLowerCase()] ?? null
+  const pool = hevyMuscle
+    ? templates.filter(t => t.primary_muscle_group === hevyMuscle)
+    : templates
+
+  let best = null
+  let bestScore = 0.55 // minimum to avoid guessing unrelated exercises
+  for (const t of pool) {
+    const score = wordOverlap(exerciseName, t.title)
+    if (score > bestScore) { bestScore = score; best = t }
+  }
+  return best
 }
 
 /**
  * Resolve a Hevy exercise_template_id for the given exercise.
- * Uses an exact name match against existing templates; if none found,
- * creates a custom template with the exact exercise name and metadata.
- * The `created` map is a local cache { normalizedName → id } to avoid
- * duplicate creates within a single send operation.
+ * Prefers existing templates (exact or close name match).
+ * Only creates a custom template if truly nothing matches.
+ * `created` is a per-send cache { normalizedName → id } to avoid duplicates.
  */
 export async function resolveHevyTemplateId(apiKey, ex, apiMuscle, templates, created) {
-  const existing = findExactTemplate(ex.name, templates)
-  if (existing) return existing.id
+  const existing = findMatchingTemplate(ex.name, apiMuscle, templates)
+  if (existing) return String(existing.id)
 
   const key = normalize(ex.name)
   if (created[key]) return created[key]
 
   const id = await createHevyExerciseTemplate(apiKey, ex, apiMuscle)
-  created[key] = id
-  return id
+  created[key] = String(id)
+  return created[key]
 }
 
 function parseScheme(scheme) {

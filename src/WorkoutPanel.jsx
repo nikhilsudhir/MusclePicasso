@@ -487,17 +487,24 @@ function HevySync({ exerciseList, workoutType }) {
     try {
       const templates = await fetchAllHevyTemplates(key)
       const created = {}
-      const items = await Promise.all(
-        exerciseList.map(async ({ ex, apiMuscle, scheme }) => ({
-          templateId: await resolveHevyTemplateId(key, ex, apiMuscle, templates, created),
-          scheme,
-        }))
-      )
-      const routine = buildHevyRoutine(items.filter(i => i.templateId), workoutType, `Muscle Picasso — ${new Date().toLocaleDateString()}`)
+      const items = []
+      const failures = []
+      // Sequential to avoid parallel duplicate template creation
+      for (const { ex, apiMuscle, scheme } of exerciseList) {
+        try {
+          const templateId = await resolveHevyTemplateId(key, ex, apiMuscle, templates, created)
+          if (templateId) items.push({ templateId, scheme })
+        } catch (err) {
+          failures.push(`${ex.name}: ${err.message}`)
+        }
+      }
+      if (items.length === 0) throw new Error(`All exercises failed.\n${failures.join('\n')}`)
+      const routine = buildHevyRoutine(items, workoutType, `Muscle Picasso — ${new Date().toLocaleDateString()}`)
       await createHevyRoutine(key, routine)
-      setSendStatus('success')
+      if (failures.length > 0) console.warn('Hevy skipped exercises:', failures)
+      setSendStatus(`success:${items.length}:${failures.length}`)
     } catch (err) {
-      setSendErr(err.message.includes('401') ? 'Session expired — reconnect' : err.message)
+      setSendErr(err.message.includes('401') ? 'Session expired — reconnect' : err.message.slice(0, 120))
       setSendStatus('error')
     }
   }
@@ -568,26 +575,40 @@ function HevySync({ exerciseList, workoutType }) {
             </div>
 
             {/* Send button */}
-            <button
-              onClick={sendStatus !== 'success' ? handleSend : undefined}
-              disabled={sendStatus === 'loading'}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 8,
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: sendStatus === 'success' ? 'rgba(59,255,138,0.08)' : 'rgba(255,255,255,0.03)',
-                color: sendStatus === 'success' ? '#3bff8a' : sendStatus === 'loading' ? '#555' : '#aaa',
-                fontSize: 12, fontWeight: 600,
-                cursor: sendStatus === 'loading' || sendStatus === 'success' ? 'default' : 'pointer',
-                fontFamily: 'inherit', transition: 'all 0.2s',
-              }}
-            >
-              {sendStatus === 'loading' ? 'Sending…' : sendStatus === 'success' ? '✓ Added to Hevy' : 'Add routine to Hevy'}
-            </button>
-
-            {sendStatus === 'error' && (
-              <span style={{ fontSize: 11, color: '#ff3b5c' }}>{sendErr}</span>
-            )}
+            {(() => {
+              const isSuccess = sendStatus.startsWith('success')
+              const [, added, skipped] = sendStatus.split(':')
+              return (
+                <>
+                  <button
+                    onClick={!isSuccess ? handleSend : undefined}
+                    disabled={sendStatus === 'loading'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 14px', borderRadius: 8,
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      background: isSuccess ? 'rgba(59,255,138,0.08)' : 'rgba(255,255,255,0.03)',
+                      color: isSuccess ? '#3bff8a' : sendStatus === 'loading' ? '#555' : '#aaa',
+                      fontSize: 12, fontWeight: 600,
+                      cursor: sendStatus === 'loading' || isSuccess ? 'default' : 'pointer',
+                      fontFamily: 'inherit', transition: 'all 0.2s',
+                    }}
+                  >
+                    {sendStatus === 'loading'
+                      ? 'Sending…'
+                      : isSuccess
+                        ? `✓ ${added} exercise${added === '1' ? '' : 's'} added to Hevy`
+                        : 'Add routine to Hevy'}
+                  </button>
+                  {isSuccess && parseInt(skipped) > 0 && (
+                    <span style={{ fontSize: 11, color: '#666' }}>{skipped} skipped — check console</span>
+                  )}
+                  {sendStatus === 'error' && (
+                    <span style={{ fontSize: 11, color: '#ff3b5c' }}>{sendErr}</span>
+                  )}
+                </>
+              )
+            })()}
           </>
         ) : (
           <button
