@@ -218,6 +218,27 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
 }
 
 /**
+ * Adjusts camera for portrait/mobile screens so the full body is visible.
+ */
+function CameraSetup({ orbitControlsRef }) {
+  const { camera, size } = useThree()
+  useEffect(() => {
+    if (size.height > size.width * 1.1) {
+      // Portrait — zoom out so the full body fits vertically
+      camera.position.set(0, 1.1, 3.4)
+      camera.fov = 52
+      camera.updateProjectionMatrix()
+      const controls = orbitControlsRef.current
+      if (controls) {
+        controls.target.set(0, 1.1, 0)
+        controls.update()
+      }
+    }
+  }, [camera, size, orbitControlsRef])
+  return null
+}
+
+/**
  * Configures orbit controls. Right-drag orbits by default; BodyModel's capture
  * handler overrides this when right-clicking on paint.
  */
@@ -235,8 +256,9 @@ function SmartOrbitControls({ brushActive, controlsRef }) {
     }
     controls.touches = {
       ONE: null,
-      TWO: THREE.TOUCH.DOLLY_ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN, // pinch = zoom, two-finger drag = pan
     }
+    controls.enablePan = true
     controls.enableDamping = true
     controls.dampingFactor = 0.08
     controls.target.set(0, 1.0, 0)
@@ -333,6 +355,9 @@ const Viewport3D = forwardRef(function Viewport3D(
 
       {/* Orbit: right-drag (unpainted areas) or Ctrl+left-drag */}
       <SmartOrbitControls brushActive={brushActiveRef} controlsRef={orbitControlsRef} />
+
+      {/* Adjust camera for portrait/mobile screens */}
+      <CameraSetup orbitControlsRef={orbitControlsRef} />
     </Canvas>
   )
 })

@@ -11,6 +11,16 @@ const DIFF_FILTERS = ['All', 'Beginner', 'Intermediate', 'Advanced']
 const DEFAULT_TOTAL = 6
 const FETCH_LIMIT = 25
 
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < breakpoint)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [breakpoint])
+  return isMobile
+}
+
 const BODYWEIGHT_EQUIPMENT = ['body weight', 'assisted', 'band', 'resistance band', 'suspension']
 
 function isBodyweight(exercise) {
@@ -56,13 +66,14 @@ function scoreExercise(ex, paintedMuscleIds) {
   }, 0)
 }
 
-function findBestExercise(exerciseData, paintedMuscleIds) {
+function findBestExercise(exerciseData, paintedMuscleIds, workoutType = 'weights') {
   const paintedApiMuscles = paintedMuscleIds.map((id) => EXERCISES[id]?.apiMuscle).filter(Boolean)
   let best = null
   let bestScore = -1
 
   for (const [muscleId, exercises] of Object.entries(exerciseData)) {
-    for (const ex of exercises) {
+    const pool = workoutType === 'calisthenics' ? exercises.filter(isBodyweight) : exercises
+    for (const ex of pool) {
       const score = scoreExercise(ex, paintedMuscleIds)
       if (score === 0) continue
       const total = score * 10 + gymScore(ex)
@@ -113,6 +124,7 @@ function distribute(muscleIds, total) {
 }
 
 export default function WorkoutPanel({ paintedMuscles, onBack }) {
+  const isMobile = useIsMobile()
   const [exerciseData, setExerciseData] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -163,7 +175,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
     return sorted.slice(0, allocation[id] ?? 0)
   }
 
-  const bestExercise = !loading && !error ? findBestExercise(exerciseData, muscleIds) : null
+  const bestExercise = !loading && !error ? findBestExercise(exerciseData, muscleIds, workoutType) : null
 
   const totalShown = activeMuscleIds.reduce((sum, id) => sum + getExercises(id).length, 0)
 
@@ -180,7 +192,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
 
   return (
     <>
-    <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 16 : 24 }}>
       <div style={{ maxWidth: 700, margin: '0 auto' }}>
         <Button variant="ghost" size="sm" onClick={onBack} className="mb-6 text-muted-foreground -ml-1">
           ← Back to Model
@@ -209,7 +221,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
           ))}
         </div>
 
-        <h2 style={styles.title}>Your Painted Workout</h2>
+        <h2 style={{ ...styles.title, fontSize: isMobile ? 22 : 28 }}>Your Painted Workout</h2>
         <p style={styles.subtitle}>
           Targeting {paintedMuscles.size} muscle group
           {paintedMuscles.size !== 1 ? 's' : ''} · {loading ? '…' : `${totalShown} exercises`}
@@ -249,16 +261,16 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
             <div style={{ fontSize: 9, fontWeight: 700, color: '#ffb03b', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 12 }}>
               ★ Best Overall Pick
             </div>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: isMobile ? 'flex-start' : 'center' }}>
               {bestExercise.gifUrl && (
                 <img
                   src={bestExercise.gifUrl}
                   alt={bestExercise.name}
-                  style={{ width: 88, height: 88, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,176,59,0.2)' }}
+                  style={{ width: isMobile ? '100%' : 88, height: isMobile ? 'auto' : 88, borderRadius: 10, objectFit: 'contain', flexShrink: 0, border: '1px solid rgba(255,176,59,0.2)' }}
                 />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', textTransform: 'capitalize', marginBottom: 6 }}>
+                <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 900, color: '#fff', textTransform: 'capitalize', marginBottom: 6 }}>
                   {bestExercise.name}
                 </div>
                 {bestExercise.covered.length > 0 && (
@@ -303,7 +315,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
 
         {/* Controls */}
         {!loading && !error && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 10 : 16, marginBottom: 20 }}>
             {/* Difficulty filter */}
             <div className="flex items-center gap-1.5">
               <span style={styles.controlLabel}>Difficulty</span>
@@ -330,7 +342,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
             </div>
 
             {/* Total exercise count */}
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2">
               <span style={styles.controlLabel}>Total exercises</span>
               <Button variant="outline" size="icon" onClick={() => setTotal((t) => Math.max(1, t - 1))}>−</Button>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ccc', minWidth: 16, textAlign: 'center' }}>

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, Suspense } from 'react'
+import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
 import Viewport3D from './Viewport3D'
 import WorkoutPanel from './WorkoutPanel'
 import { EXERCISES } from './exercises'
@@ -6,8 +6,19 @@ import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { cn } from './lib/utils'
 
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < breakpoint)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [breakpoint])
+  return isMobile
+}
+
 export default function App() {
   const viewportRef = useRef(null)
+  const isMobile = useIsMobile()
   const [paintMode, setPaintMode] = useState('add')
   const [brushSize, setBrushSize] = useState(30)
   const [paintedMuscles, setPaintedMuscles] = useState(new Set())
@@ -32,11 +43,11 @@ export default function App() {
 
       {/* Header */}
       <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={styles.logo}>🎨</div>
           <div>
-            <h1 style={styles.logoTitle}>Muscle Picasso</h1>
-            <p style={styles.logoSub}>3D anatomical model</p>
+            <h1 style={{ ...styles.logoTitle, fontSize: isMobile ? 13 : 15 }}>Muscle Picasso</h1>
+            {!isMobile && <p style={styles.logoSub}>3D anatomical model</p>}
           </div>
         </div>
         {paintedMuscles.size > 0 && (
@@ -45,7 +56,7 @@ export default function App() {
             variant={showWorkout ? 'outline' : 'default'}
             onClick={() => setShowWorkout(!showWorkout)}
           >
-            {showWorkout ? '← Back to Model' : `View Workout (${paintedMuscles.size})`}
+            {showWorkout ? '← Back' : `View Workout (${paintedMuscles.size})`}
           </Button>
         )}
       </header>
@@ -57,26 +68,99 @@ export default function App() {
           <Suspense fallback={<LoadingOverlay />}>
             <Viewport3D
               ref={viewportRef}
-
               brushSize={brushSize}
               paintMode={paintMode}
               onPaintStroke={handlePaintStroke}
             />
           </Suspense>
 
-          {/* Control hints */}
-          <div style={styles.hints}>
-            <span>🖌️ Left click: Paint</span>
-            <span>🔄 Right click / Ctrl+drag: Orbit</span>
-            <span>🔍 Scroll: Zoom</span>
-          </div>
+          {/* Control hints — desktop only */}
+          {!isMobile && (
+            <div style={styles.hints}>
+              <span>🖌️ Left click: Paint</span>
+              <span>🔄 Right click / Ctrl+drag: Orbit</span>
+              <span>🔍 Scroll: Zoom</span>
+            </div>
+          )}
         </div>
 
-        {/* Sidebar — hidden when showing workout */}
-        <div style={{ ...styles.sidebar, display: showWorkout ? 'none' : 'flex' }}>
-          {/* Brush Mode */}
-          <Section label="Brush Mode">
-            <div style={{ display: 'flex', gap: 4 }}>
+        {/* Sidebar — desktop only, hidden when showing workout */}
+        {!isMobile && (
+          <div style={{ ...styles.sidebar, display: showWorkout ? 'none' : 'flex' }}>
+            {/* Brush Mode */}
+            <Section label="Brush Mode">
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[
+                  { key: 'add', label: '🖌️ Paint' },
+                  { key: 'erase', label: '🧹 Erase' },
+                ].map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setPaintMode(m.key)}
+                    className={cn(
+                      'flex-1 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer',
+                      paintMode === m.key
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </Section>
+
+            {/* Brush Size */}
+            <Section label={`Brush Size: ${brushSize}`}>
+              <Slider
+                min={10}
+                max={80}
+                value={[brushSize]}
+                onValueChange={([v]) => setBrushSize(v)}
+              />
+            </Section>
+
+            {/* Detected muscles */}
+            {paintedMuscles.size > 0 && (
+              <Section label={`Detected (${paintedMuscles.size})`}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {[...paintedMuscles].map((id) => {
+                    const info = EXERCISES[id]
+                    if (!info) return null
+                    return (
+                      <span key={id} style={{ ...styles.tag, background: info.color + '20', color: info.color, borderColor: info.color + '30' }}>
+                        {info.label}
+                      </span>
+                    )
+                  })}
+                </div>
+              </Section>
+            )}
+
+            {/* Actions */}
+            {paintedMuscles.size > 0 && (
+              <Button onClick={() => setShowWorkout(true)} className="w-full" size="sm">
+                Generate Workout →
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={handleClear} className="w-full text-muted-foreground">
+              Clear All Paint
+            </Button>
+          </div>
+        )}
+
+        {/* Workout panel */}
+        {showWorkout && (
+          <WorkoutPanel paintedMuscles={paintedMuscles} onBack={() => setShowWorkout(false)} />
+        )}
+      </div>
+
+      {/* Mobile bottom toolbar */}
+      {isMobile && !showWorkout && (
+        <div style={styles.mobileBottom}>
+          {/* Row 1: mode toggle + brush size */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 4, flex: 1 }}>
               {[
                 { key: 'add', label: '🖌️ Paint' },
                 { key: 'erase', label: '🧹 Erase' },
@@ -85,61 +169,53 @@ export default function App() {
                   key={m.key}
                   onClick={() => setPaintMode(m.key)}
                   className={cn(
-                    'flex-1 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer',
+                    'flex-1 py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer',
                     paintMode === m.key
                       ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
+                      : 'border-border bg-transparent text-muted-foreground'
                   )}
                 >
                   {m.label}
                 </button>
               ))}
             </div>
-          </Section>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+              <span style={{ fontSize: 10, color: '#444', whiteSpace: 'nowrap' }}>Size {brushSize}</span>
+              <Slider min={10} max={80} value={[brushSize]} onValueChange={([v]) => setBrushSize(v)} />
+            </div>
+          </div>
 
-          {/* Brush Size */}
-          <Section label={`Brush Size: ${brushSize}`}>
-            <Slider
-              min={10}
-              max={80}
-              value={[brushSize]}
-              onValueChange={([v]) => setBrushSize(v)}
-            />
-          </Section>
-
-          {/* Detected muscles */}
-          {paintedMuscles.size > 0 && (
-            <Section label={`Detected (${paintedMuscles.size})`}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {[...paintedMuscles].map((id) => {
-                  const info = EXERCISES[id]
-                  if (!info) return null
-                  return (
-                    <span key={id} style={{ ...styles.tag, background: info.color + '20', color: info.color, borderColor: info.color + '30' }}>
-                      {info.label}
-                    </span>
-                  )
-                })}
-              </div>
-            </Section>
-          )}
-
-          {/* Actions */}
-          {paintedMuscles.size > 0 && (
-            <Button onClick={() => setShowWorkout(true)} className="w-full" size="sm">
+          {/* Row 2: detected muscles + generate (always visible to prevent layout shift) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', minHeight: 22 }}>
+              {paintedMuscles.size === 0 ? (
+                <span style={{ fontSize: 10, color: '#333', fontStyle: 'italic' }}>Paint the model to detect muscles</span>
+              ) : (
+                <>
+                  {[...paintedMuscles].map((id) => {
+                    const info = EXERCISES[id]
+                    if (!info) return null
+                    return (
+                      <span key={id} style={{ ...styles.tag, background: info.color + '20', color: info.color, borderColor: info.color + '30' }}>
+                        {info.label}
+                      </span>
+                    )
+                  })}
+                  <button
+                    onClick={handleClear}
+                    style={{ ...styles.tag, background: 'rgba(255,255,255,0.04)', color: '#555', borderColor: 'rgba(255,255,255,0.08)', cursor: 'pointer' }}
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+            </div>
+            <Button onClick={() => setShowWorkout(true)} className="w-full" size="sm" disabled={paintedMuscles.size === 0}>
               Generate Workout →
             </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={handleClear} className="w-full text-muted-foreground">
-            Clear All Paint
-          </Button>
+          </div>
         </div>
-
-        {/* Workout panel */}
-        {showWorkout && (
-          <WorkoutPanel paintedMuscles={paintedMuscles} onBack={() => setShowWorkout(false)} />
-        )}
-      </div>
+      )}
     </div>
   )
 }
@@ -166,7 +242,7 @@ function LoadingOverlay() {
 const styles = {
   root: {
     width: '100%',
-    height: '100vh',
+    height: '100%',
     background: '#08080f',
     fontFamily: "'DM Sans', system-ui, sans-serif",
     color: '#d0d0dc',
@@ -307,6 +383,18 @@ const styles = {
     fontSize: 10,
     cursor: 'pointer',
     fontFamily: 'inherit',
+  },
+  mobileBottom: {
+    padding: '10px 16px',
+    paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+    background: 'rgba(6,6,12,0.97)',
+    backdropFilter: 'blur(20px)',
+    borderTop: '1px solid rgba(255,255,255,0.06)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    flexShrink: 0,
+    zIndex: 10,
   },
   loading: {
     position: 'absolute',
