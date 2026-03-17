@@ -9,7 +9,7 @@ import { createPaintMaterial } from './paintShader'
  * Inner component that loads the GLB, sets up the paint shader,
  * and handles raycasting + painting on pointer events.
  */
-function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPaintStroke, modelColor }) {
+function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPaintStroke, modelColor, onHitPoint }) {
   const gltf = useGLTF(modelPath)
   const meshRef = useRef(null)
   const raycaster = useRef(new THREE.Raycaster())
@@ -66,10 +66,14 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
       const hits = raycaster.current.intersectObject(meshRef.current, false)
 
       if (hits.length > 0 && hits[0].uv) {
+        // Compute world-space surface normal for accurate muscle side detection
+        const worldNormal = hits[0].face.normal.clone()
+          .transformDirection(meshRef.current.matrixWorld)
         const prevMode = paintEngine.mode
         if (modeOverride) paintEngine.mode = modeOverride
-        paintEngine.paintAtUV(hits[0].uv, hits[0].point)
+        paintEngine.paintAtUV(hits[0].uv, hits[0].point, worldNormal)
         paintEngine.mode = prevMode
+        onHitPoint?.({ point: hits[0].point, normal: worldNormal })
         // Only notify parent ~10×/sec to avoid re-rendering on every mousemove
         const now = Date.now()
         if (now - lastNotifyRef.current > 100) {
@@ -330,7 +334,7 @@ function SmartOrbitControls({ brushActive, controlsRef }) {
  * Exposes clearPaint() and detectMuscles() via ref.
  */
 const Viewport3D = forwardRef(function Viewport3D(
-  { brushSize, paintMode, onPaintStroke, modelColor },
+  { brushSize, paintMode, onPaintStroke, modelColor, onHitPoint },
   ref
 ) {
   const paintEngineRef = useRef(null)
@@ -396,6 +400,7 @@ const Viewport3D = forwardRef(function Viewport3D(
         orbitControlsRef={orbitControlsRef}
         onPaintStroke={onPaintStroke}
         modelColor={modelColor ?? '#ffffff'}
+        onHitPoint={onHitPoint}
       />
 
       {/* Orbit: right-drag (unpainted areas) or Ctrl+left-drag */}

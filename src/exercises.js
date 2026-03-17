@@ -28,10 +28,16 @@ export const EXERCISES = {
   glute_max:      { label: 'Glutes (Max)',    color: '#ff3bd4', apiMuscle: 'glutes' },
   glute_med:      { label: 'Glutes (Med)',    color: '#ff3baa', apiMuscle: 'glutes' },
   // Legs
-  quads:          { label: 'Quadriceps',      color: '#ff5c5c', apiMuscle: 'quads' },
-  hamstrings:     { label: 'Hamstrings',      color: '#4ecdc4', apiMuscle: 'hamstrings' },
-  gastrocnemius:  { label: 'Gastrocnemius',   color: '#45b7d1', apiMuscle: 'calves' },
-  soleus:         { label: 'Soleus',          color: '#45c9b5', apiMuscle: 'calves' },
+  quads:              { label: 'Quadriceps',        color: '#ff5c5c', apiMuscle: 'quads' },
+  hamstrings:         { label: 'Hamstrings',        color: '#4ecdc4', apiMuscle: 'hamstrings' },
+  adductors:          { label: 'Adductors',         color: '#ff9f3b', apiMuscle: 'adductors' },
+  abductors:          { label: 'Abductors',         color: '#ff6b9d', apiMuscle: 'abductors' },
+  gastrocnemius:      { label: 'Gastrocnemius',     color: '#45b7d1', apiMuscle: 'calves' },
+  soleus:             { label: 'Soleus',            color: '#45c9b5', apiMuscle: 'calves' },
+  // Neck / Scapular
+  levator_scapulae:   { label: 'Levator Scapulae',  color: '#3bffb8', apiMuscle: 'levator scapulae' },
+  // Torso sides
+  serratus_anterior:  { label: 'Serratus Anterior', color: '#c8ff3b', apiMuscle: 'serratus anterior' },
 }
 
 // ─── Client-side difficulty classifier ───

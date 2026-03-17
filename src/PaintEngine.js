@@ -38,7 +38,7 @@ export class PaintEngine {
    * Paint a soft brush stroke at a UV coordinate (0–1) and detect the muscle
    * from the 3D world hit point.
    */
-  paintAtUV(uv, worldPoint) {
+  paintAtUV(uv, worldPoint, worldNormal) {
     if (!uv) return
 
     const x = uv.x * 2048
@@ -68,7 +68,7 @@ export class PaintEngine {
       ctx.restore()
 
       if (worldPoint) {
-        const muscle = detectMuscleFromPoint(worldPoint)
+        const muscle = detectMuscleFromPoint(worldPoint, worldNormal)
         if (muscle) {
           this._detectedMuscles.add(muscle)
           if (!this._muscleUVs[muscle]) this._muscleUVs[muscle] = []
@@ -114,79 +114,104 @@ export class PaintEngine {
 
 /**
  * Map a 3D world-space hit point to a muscle group key.
- * Assumes the model is auto-scaled to ~2.2 units tall, feet at y≈0, head at y≈2.2.
- * x is lateral (arms extend outward), z is depth (front = positive, back = negative).
+ *
+ * All thresholds are derived from physical calibration of this specific model
+ * (male_base_muscular_anatomy.glb, scaled to ~2.2 units tall).
+ *
+ * Features per hit point:
+ *   y       — height (0 = feet, 2.2 = head)
+ *   absX    — |x|, lateral distance from body midline
+ *   nz      — surface normal z-component (+1 = faces viewer/front, -1 = faces back)
+ *   ny      — surface normal y-component (+1 = faces up, -1 = faces down)
+ *   outward — nx * sign(x): normal component pointing away from midline on each side
  */
-function detectMuscleFromPoint(point) {
-  const { x, y, z } = point
+function detectMuscleFromPoint(point, normal) {
+  const { x, y } = point
   const absX = Math.abs(x)
+  const nx = normal?.x ?? 0
+  const ny = normal?.y ?? 0
+  const nz = normal?.z ?? 0
+  const outward = nx * Math.sign(x || 1)
 
-  // Head/neck — no muscle to target
-  if (y > 1.9) return null
+  // Head and neck: no paintable muscle
+  if (y > 1.88) return null
 
-  // Arms — significant lateral displacement from torso centre
-  if (absX > 0.28 && y > 0.85 && y < 1.85) {
-    if (y > 1.6) {
-      // Deltoid — split front / side / rear by z depth
-      if (z > 0.03) return 'front_delt'
-      if (z < -0.03) return 'rear_delt'
-      return 'side_delt'
-    }
-    if (y > 1.25) return z >= 0 ? 'biceps' : 'triceps'
-    return 'forearms'
+  // ── ARMS (T-pose: y 1.44–1.62, absX > 0.19) ──
+  // Key calibration finding: biceps face FORWARD (nz 0.18–0.92), not upward.
+  // Triceps face BACKWARD (nz -1.00 to -0.75). Deltoids at y 1.54–1.62, absX 0.20–0.35.
+  if (absX > 0.19 && y > 1.44 && y < 1.62) {
+    // Forearms: unambiguous — outermost absX (0.53–0.86)
+    if (absX > 0.52) return 'forearms'
+    // Triceps: strongly posterior face (nz -1.00 to -0.75)
+    if (nz < -0.70) return 'triceps'
+    // Biceps: forward-facing, past deltoid into upper-arm zone (absX > 0.32, nz > 0.15)
+    if (absX > 0.32 && nz > 0.15) return 'biceps'
+    // Deltoid cap (absX 0.20–0.35, y 1.54–1.62)
+    if (nz > 0.50) return 'front_delt'
+    if (nz < -0.20) return 'rear_delt'
+    return 'side_delt'  // top-facing shoulder cap (ny ≈ 0.95)
   }
 
-  // Shoulder caps — same front/side/rear split
-  if (absX > 0.2 && y > 1.6 && y < 1.85) {
-    if (z > 0.03) return 'front_delt'
-    if (z < -0.03) return 'rear_delt'
-    return 'side_delt'
+  // ── LEVATOR SCAPULAE (lateral neck, y 1.62–1.72) ──
+  // Must be checked before traps; requires lateral outward normal.
+  if (y > 1.62 && y < 1.73 && absX > 0.05 && absX < 0.18 && outward > 0.10) return 'levator_scapulae'
+
+  // ── MID BACK (central spine, y 1.33–1.63) ──
+  // Very tight absX < 0.06; must precede traps to avoid being absorbed.
+  if (y > 1.33 && y < 1.63 && absX < 0.06 && nz < -0.40) return 'mid_back'
+
+  // ── TRAPS (posterior upper back, y 1.33–1.72, absX < 0.18) ──
+  if (y > 1.33 && y < 1.73 && absX < 0.18 && nz < -0.08) return 'traps'
+
+  // ── CHEST ──
+  // Upper chest: y 1.49–1.57, nz > 0.60 (forward-and-upward face)
+  if (y > 1.49 && y < 1.57 && nz > 0.60 && absX < 0.23) return 'upper_chest'
+  // Lower chest: y 1.37–1.47, nz > 0.54
+  if (y > 1.37 && y < 1.47 && nz > 0.54 && absX < 0.22) return 'lower_chest'
+
+  // ── LATERAL TORSO (outward > 0.50) ──
+  // Serratus anterior and obliques share the lateral ribcage/waist surface.
+  // Both calibrated with outward 0.52–0.98; split by y (serratus higher, obliques lower).
+  if (outward > 0.50 && absX > 0.14 && y > 1.20 && y < 1.42) {
+    return y > 1.28 ? 'serratus_anterior' : 'obliques'
   }
 
-  // Traps — upper back / neck base
-  if (y > 1.6 && y < 1.85 && absX < 0.2 && z < 0.05) return 'traps'
+  // ── LATS (posterior lateral back, y 1.15–1.51) ──
+  // outward > 0.30 separates from central back muscles.
+  if (y > 1.15 && y < 1.52 && nz < -0.25 && absX > 0.12 && outward > 0.30) return 'lats'
 
-  // Upper chest — clavicular head (incline zone)
-  if (y > 1.48 && y < 1.65 && z > 0.05) return 'upper_chest'
+  // ── LOWER BACK (y 1.14–1.22, posterior) ──
+  if (y > 1.14 && y < 1.23 && nz < -0.24) return 'lower_back'
 
-  // Lower chest — sternal head (flat/decline zone)
-  if (y > 1.22 && y < 1.48 && z > 0.08) return 'lower_chest'
+  // ── ABS ──
+  // Upper abs: narrow band y 1.30–1.35, nz > 0.40
+  if (y > 1.30 && y < 1.35 && nz > 0.40 && absX < 0.16) return 'upper_abs'
+  // Lower abs: y 1.09–1.27, nz > 0.48
+  if (y > 1.09 && y < 1.27 && nz > 0.48 && absX < 0.12) return 'lower_abs'
 
-  // Lats — outer/lateral back sweep
-  if (y > 1.2 && y < 1.6 && z < -0.03 && absX > 0.13) return 'lats'
+  // ── GLUTES ──
+  // Glute med: upper-outer glute, more upward-tilted face (ny > 0.14), y 1.08–1.16
+  if (y > 1.08 && y < 1.16 && nz < -0.35 && ny > 0.14) return 'glute_med'
+  // Glute max: main posterior mass, y 0.93–1.15
+  if (y > 0.93 && y < 1.15 && nz < -0.28) return 'glute_max'
 
-  // Mid Back — rhomboids / central upper back
-  if (y > 1.3 && y < 1.65 && z < -0.05) return 'mid_back'
+  // ── HIPS / UPPER THIGH ──
+  // Abductors: strongly outward-facing lateral hip, y 0.81–1.12
+  if (y > 0.81 && y < 1.12 && absX > 0.14 && outward > 0.20) return 'abductors'
+  // Adductors: strongly inward-facing inner thigh (outward -0.99 to -0.67), y 0.70–0.90
+  if (y > 0.70 && y < 0.91 && outward < -0.65) return 'adductors'
 
-  // Lower Back — erector spinae / lumbar
-  if (y > 1.15 && y < 1.3 && z < -0.05) return 'lower_back'
+  // ── THIGH ──
+  // Quads: forward-facing anterior thigh, y 0.60–1.04
+  if (y > 0.60 && y < 1.05 && nz > 0.28) return 'quads'
+  // Hamstrings: posterior thigh, y 0.57–0.90
+  if (y > 0.57 && y < 0.90 && nz < -0.30) return 'hamstrings'
 
-  // Obliques — lateral sides of torso (checked before abs)
-  if (y > 1.0 && y < 1.38 && absX > 0.12 && z > -0.03) return 'obliques'
-
-  // Upper Abs — above navel
-  if (y > 1.18 && y < 1.38 && z >= 0) return 'upper_abs'
-
-  // Lower Abs — below navel
-  if (y > 1.0 && y < 1.18 && z >= 0) return 'lower_abs'
-
-  // Glute Med — upper/outer glutes (checked before glute max)
-  if (y > 1.0 && y < 1.15 && z < 0 && absX > 0.08) return 'glute_med'
-
-  // Glute Max — main gluteal mass
-  if (y > 0.75 && y < 1.1 && z < 0) return 'glute_max'
-
-  // Gastrocnemius — upper/outer calf (checked before hamstrings to avoid z < 0 clash)
-  if (y > 0.18 && y < 0.38) return 'gastrocnemius'
-
-  // Soleus — lower calf
-  if (y >= 0 && y < 0.18) return 'soleus'
-
-  // Quads — front thigh
-  if (y > 0.38 && y < 0.85 && z >= 0) return 'quads'
-
-  // Hamstrings — rear thigh (lower bound raised to clear calf region)
-  if (y > 0.38 && y < 0.85 && z < 0) return 'hamstrings'
+  // ── LOWER LEG ──
+  // Gastrocnemius: posterior calf, y 0.34–0.58
+  if (y > 0.34 && y < 0.58 && nz < -0.15) return 'gastrocnemius'
+  // Soleus: lower calf, y 0.17–0.33
+  if (y > 0.17 && y < 0.33) return 'soleus'
 
   return null
 }
