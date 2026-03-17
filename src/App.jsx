@@ -164,6 +164,7 @@ export default function App() {
               {[
                 { key: 'add', label: '🖌️ Paint' },
                 { key: 'erase', label: '🧹 Erase' },
+                { key: 'navigate', label: '✋ Move' },
               ].map((m) => (
                 <button
                   key={m.key}
@@ -179,7 +180,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: paintMode === 'navigate' ? 0 : 1, opacity: paintMode === 'navigate' ? 0 : 1, pointerEvents: paintMode === 'navigate' ? 'none' : 'auto', transition: 'opacity 0.2s' }}>
               <span style={{ fontSize: 10, color: '#444', whiteSpace: 'nowrap' }}>Size {brushSize}</span>
               <Slider min={10} max={80} value={[brushSize]} onValueChange={([v]) => setBrushSize(v)} />
             </div>

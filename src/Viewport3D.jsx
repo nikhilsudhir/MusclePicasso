@@ -344,8 +344,22 @@ const Viewport3D = forwardRef(function Viewport3D(
   }, [brushSize, paintEngine])
 
   useEffect(() => {
-    paintEngine.mode = paintMode
+    if (paintMode !== 'navigate') paintEngine.mode = paintMode
   }, [paintMode, paintEngine])
+
+  // Navigate mode: disable painting, enable full 1-finger orbit + 2-finger pan/zoom
+  useEffect(() => {
+    brushActiveRef.current = paintMode !== 'navigate'
+    const controls = orbitControlsRef.current
+    if (!controls) return
+    if (paintMode === 'navigate') {
+      controls.touches.ONE = THREE.TOUCH.ROTATE
+      controls.touches.TWO = THREE.TOUCH.DOLLY_PAN
+    } else {
+      controls.touches.ONE = THREE.TOUCH.ROTATE
+      controls.touches.TWO = THREE.TOUCH.DOLLY
+    }
+  }, [paintMode])
 
   // Expose methods to parent
   useImperativeHandle(ref, () => ({
