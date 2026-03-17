@@ -103,10 +103,28 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
 
     const resetStroke = () => { lastX = null; lastY = null }
 
-    // Capture-phase handler for right-click: runs before OrbitControls sees the event.
-    // If right-clicking on paint → disable right-orbit and erase instead.
-    // If right-clicking elsewhere → leave right-orbit enabled.
+    // Capture-phase handler: runs before OrbitControls sees any pointerdown.
+    // For touch on model → stopPropagation() blocks OrbitControls, start painting.
+    // For touch off model → let OrbitControls handle orbit.
+    // For mouse right-click on model → block right-orbit and erase instead.
     const onDownCapture = (e) => {
+      if (e.pointerType === 'touch') {
+        if (!brushActive.current || !meshRef.current) return
+        const rect = canvas.getBoundingClientRect()
+        pointer.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+        pointer.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+        raycaster.current.setFromCamera(pointer.current, camera)
+        const hits = raycaster.current.intersectObject(meshRef.current, false)
+        if (hits.length > 0) {
+          // On model — block OrbitControls entirely, start painting
+          e.stopPropagation()
+          painting = true
+          doPaintInterpolated(e.clientX, e.clientY, null)
+        }
+        // Off model — fall through so OrbitControls handles orbit
+        return
+      }
+
       if (e.button !== 2) return
       const controls = orbitControlsRef.current
       if (!controls || !meshRef.current) return
@@ -129,6 +147,7 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     }
 
     const onDown = (e) => {
+      if (e.pointerType === 'touch') return // handled in capture phase
       // Only paint on left-click without modifier keys
       if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
       if (!brushActive.current) return
@@ -137,12 +156,17 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     }
 
     const onMove = (e) => {
+      if (e.pointerType === 'touch') {
+        if (painting && brushActive.current) doPaintInterpolated(e.clientX, e.clientY, null)
+        return
+      }
       if (!brushActive.current) return
       if (painting && e.buttons === 1) doPaintInterpolated(e.clientX, e.clientY, null)
       if (erasing && e.buttons === 2) doPaintInterpolated(e.clientX, e.clientY, 'erase')
     }
 
     const onUp = (e) => {
+      if (e.pointerType === 'touch') { painting = false; resetStroke(); return }
       if (e.button === 0) { painting = false; resetStroke() }
       if (e.button === 2) {
         erasing = false
@@ -154,25 +178,6 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
 
     const onContextMenu = (e) => e.preventDefault()
 
-    // Touch support
-    const onTouchStart = (e) => {
-      if (e.touches.length !== 1 || !brushActive.current) return
-      painting = true
-      const t = e.touches[0]
-      doPaintInterpolated(t.clientX, t.clientY, null)
-    }
-
-    const onTouchMove = (e) => {
-      if (!painting || e.touches.length !== 1 || !brushActive.current) return
-      const t = e.touches[0]
-      doPaintInterpolated(t.clientX, t.clientY, null)
-    }
-
-    const onTouchEnd = () => {
-      painting = false
-      resetStroke()
-    }
-
     canvas.addEventListener('pointerdown', onDownCapture, { capture: true })
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
@@ -181,9 +186,6 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('pointerleave', onLeave)
     canvas.addEventListener('contextmenu', onContextMenu)
-    canvas.addEventListener('touchstart', onTouchStart, { passive: true })
-    canvas.addEventListener('touchmove', onTouchMove, { passive: true })
-    canvas.addEventListener('touchend', onTouchEnd)
 
     return () => {
       canvas.removeEventListener('pointerdown', onDownCapture, { capture: true })
@@ -192,9 +194,6 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
       canvas.removeEventListener('pointerup', onUp)
       canvas.removeEventListener('pointerleave', onLeave)
       canvas.removeEventListener('contextmenu', onContextMenu)
-      canvas.removeEventListener('touchstart', onTouchStart)
-      canvas.removeEventListener('touchmove', onTouchMove)
-      canvas.removeEventListener('touchend', onTouchEnd)
     }
   }, [gl, camera, doPaint, brushActive, orbitControlsRef, paintEngine])
 
@@ -255,8 +254,8 @@ function SmartOrbitControls({ brushActive, controlsRef }) {
       RIGHT: THREE.MOUSE.ROTATE,
     }
     controls.touches = {
-      ONE: null,
-      TWO: THREE.TOUCH.DOLLY_PAN, // pinch = zoom, two-finger drag = pan
+      ONE: THREE.TOUCH.ROTATE, // single finger off-model = orbit
+      TWO: THREE.TOUCH.DOLLY,  // two fingers = zoom only
     }
     controls.enablePan = true
     controls.enableDamping = true
@@ -276,7 +275,7 @@ function SmartOrbitControls({ brushActive, controlsRef }) {
     }
     const onKeyUp = () => {
       controls.mouseButtons.LEFT = null
-      controls.touches.ONE = null
+      controls.touches.ONE = THREE.TOUCH.ROTATE
       brushActive.current = true
     }
 
