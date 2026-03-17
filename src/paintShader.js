@@ -10,6 +10,7 @@ export function createPaintMaterial(baseMap, paintTexture, normalMap) {
       baseMap: { value: baseMap },
       paintMap: { value: paintTexture },
       normalMap: { value: normalMap },
+      tint: { value: new THREE.Color(1, 1, 1) },
       ambientLight: { value: new THREE.Color(0.4, 0.4, 0.45) },
       lightDir1: { value: new THREE.Vector3(0.5, 0.8, 0.5).normalize() },
       lightColor1: { value: new THREE.Color(1.0, 0.98, 0.95) },
@@ -31,6 +32,7 @@ export function createPaintMaterial(baseMap, paintTexture, normalMap) {
     fragmentShader: /* glsl */ `
       uniform sampler2D baseMap;
       uniform sampler2D paintMap;
+      uniform vec3 tint;
       uniform vec3 ambientLight;
       uniform vec3 lightDir1;
       uniform vec3 lightColor1;
@@ -43,6 +45,11 @@ export function createPaintMaterial(baseMap, paintTexture, normalMap) {
 
       void main() {
         vec4 base = texture2D(baseMap, vUv);
+        // Extract luminance from the dark base texture to preserve muscle detail,
+        // then recolor it entirely with the tint
+        float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+        float detail = clamp(lum * 2.8, 0.0, 1.0); // remap dark texture to 0-1
+        base.rgb = tint * mix(0.25, 1.0, detail);
         vec4 paint = texture2D(paintMap, vUv);
 
         // Blend: paint on top of base with paint alpha controlling mix

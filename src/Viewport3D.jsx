@@ -9,7 +9,7 @@ import { createPaintMaterial } from './paintShader'
  * Inner component that loads the GLB, sets up the paint shader,
  * and handles raycasting + painting on pointer events.
  */
-function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPaintStroke }) {
+function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPaintStroke, modelColor }) {
   const gltf = useGLTF(modelPath)
   const meshRef = useRef(null)
   const raycaster = useRef(new THREE.Raycaster())
@@ -43,6 +43,12 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
       bodyMesh.material = createPaintMaterial(origMap, paintEngine.texture, origNormal)
     }
   }, [gltf, paintEngine])
+
+  useEffect(() => {
+    if (meshRef.current?.material?.uniforms?.tint) {
+      meshRef.current.material.uniforms.tint.value.set(modelColor)
+    }
+  }, [modelColor])
 
   // Throttle state updates so React re-renders don't happen on every mousemove
   const lastNotifyRef = useRef(0)
@@ -324,7 +330,7 @@ function SmartOrbitControls({ brushActive, controlsRef }) {
  * Exposes clearPaint() and detectMuscles() via ref.
  */
 const Viewport3D = forwardRef(function Viewport3D(
-  { brushSize, paintMode, onPaintStroke },
+  { brushSize, paintMode, onPaintStroke, modelColor },
   ref
 ) {
   const paintEngineRef = useRef(null)
@@ -389,6 +395,7 @@ const Viewport3D = forwardRef(function Viewport3D(
         brushActive={brushActiveRef}
         orbitControlsRef={orbitControlsRef}
         onPaintStroke={onPaintStroke}
+        modelColor={modelColor ?? '#ffffff'}
       />
 
       {/* Orbit: right-drag (unpainted areas) or Ctrl+left-drag */}

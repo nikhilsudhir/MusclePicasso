@@ -70,6 +70,7 @@ export default function App() {
               ref={viewportRef}
               brushSize={brushSize}
               paintMode={paintMode}
+              modelColor="#dca882"
               onPaintStroke={handlePaintStroke}
             />
           </Suspense>
