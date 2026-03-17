@@ -82,6 +82,7 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     let erasing = false
     let lastX = null
     let lastY = null
+    const activeTouchIds = new Set()
 
     const doPaintInterpolated = (x, y, mode) => {
       if (lastX === null) {
@@ -104,11 +105,24 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     const resetStroke = () => { lastX = null; lastY = null }
 
     // Capture-phase handler: runs before OrbitControls sees any pointerdown.
-    // For touch on model → stopPropagation() blocks OrbitControls, start painting.
-    // For touch off model → let OrbitControls handle orbit.
+    // For touch on model → disable ONE touch orbit so OrbitControls doesn't orbit,
+    //   but still lets it register both pointers so two-finger zoom works.
+    // For touch off model → ensure ONE orbit is enabled.
     // For mouse right-click on model → block right-orbit and erase instead.
     const onDownCapture = (e) => {
       if (e.pointerType === 'touch') {
+        activeTouchIds.add(e.pointerId)
+        const controls = orbitControlsRef.current
+
+        if (activeTouchIds.size > 1) {
+          // Second finger arrived — stop painting, let OrbitControls zoom
+          painting = false
+          resetStroke()
+          if (controls) controls.touches.ONE = THREE.TOUCH.ROTATE
+          return
+        }
+
+        // Single finger — check if on model
         if (!brushActive.current || !meshRef.current) return
         const rect = canvas.getBoundingClientRect()
         pointer.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
@@ -116,12 +130,14 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
         raycaster.current.setFromCamera(pointer.current, camera)
         const hits = raycaster.current.intersectObject(meshRef.current, false)
         if (hits.length > 0) {
-          // On model — block OrbitControls entirely, start painting
-          e.stopPropagation()
+          // On model — disable single-touch orbit (set before OrbitControls reads it),
+          // OrbitControls still registers this pointer so two-finger zoom stays functional
+          if (controls) controls.touches.ONE = null
           painting = true
           doPaintInterpolated(e.clientX, e.clientY, null)
+        } else {
+          if (controls) controls.touches.ONE = THREE.TOUCH.ROTATE
         }
-        // Off model — fall through so OrbitControls handles orbit
         return
       }
 
@@ -166,7 +182,16 @@ function BodyModel({ modelPath, paintEngine, brushActive, orbitControlsRef, onPa
     }
 
     const onUp = (e) => {
-      if (e.pointerType === 'touch') { painting = false; resetStroke(); return }
+      if (e.pointerType === 'touch') {
+        activeTouchIds.delete(e.pointerId)
+        painting = false
+        resetStroke()
+        // Restore single-touch orbit once all fingers are lifted
+        if (activeTouchIds.size === 0 && orbitControlsRef.current) {
+          orbitControlsRef.current.touches.ONE = THREE.TOUCH.ROTATE
+        }
+        return
+      }
       if (e.button === 0) { painting = false; resetStroke() }
       if (e.button === 2) {
         erasing = false
