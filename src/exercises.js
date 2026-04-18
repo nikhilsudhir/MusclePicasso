@@ -1,6 +1,7 @@
 // ─── Exercise config + ExerciseDB API integration ───
 
 const BASE_URL = 'https://exercisedb.dev/api/v1'
+const EXERCISE_DB_KEY = import.meta.env.VITE_EXERCISEDB_API_KEY ?? ''
 
 // Static metadata per muscle group (label, color, API muscle name)
 export const EXERCISES = {
@@ -138,8 +139,10 @@ export function getExerciseRole(exercise, index) {
 export async function fetchMuscleExercises(muscleId, limit = 5) {
   const config = EXERCISES[muscleId]
   if (!config) throw new Error(`Unknown muscle: ${muscleId}`)
+  const headers = EXERCISE_DB_KEY ? { 'x-api-key': EXERCISE_DB_KEY } : {}
   const res = await fetch(
-    `${BASE_URL}/muscles/${config.apiMuscle}/exercises?limit=${limit}&offset=0`
+    `${BASE_URL}/muscles/${config.apiMuscle}/exercises?limit=${limit}&offset=0`,
+    { headers }
   )
   if (!res.ok) throw new Error(`API error ${res.status} for ${muscleId}`)
   const json = await res.json()
