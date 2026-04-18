@@ -1,7 +1,6 @@
 // ─── Exercise config + ExerciseDB API integration ───
 
-const BASE_URL = 'https://exercisedb.dev/api/v1'
-const EXERCISE_DB_KEY = import.meta.env.VITE_EXERCISEDB_API_KEY ?? ''
+const BASE_URL = 'https://oss.exercisedb.dev/api/v1'
 
 // Static metadata per muscle group (label, color, API muscle name)
 export const EXERCISES = {
@@ -135,16 +134,28 @@ export function getExerciseRole(exercise, index) {
   return 'Isolation'
 }
 
+function normalizeExercise(ex) {
+  // Normalize image field across API versions
+  const gifUrl = ex.gifUrl ?? ex.imageUrl ?? null
+  // Normalize array fields that some API versions return as strings
+  const equipments = Array.isArray(ex.equipments) ? ex.equipments
+    : ex.equipment ? [ex.equipment] : []
+  const targetMuscles = Array.isArray(ex.targetMuscles) ? ex.targetMuscles
+    : ex.target ? [ex.target] : []
+  const secondaryMuscles = Array.isArray(ex.secondaryMuscles) ? ex.secondaryMuscles
+    : ex.secondaryMuscles ? [ex.secondaryMuscles] : []
+  return { ...ex, gifUrl, equipments, targetMuscles, secondaryMuscles }
+}
+
 // Fetch exercises for a single muscle group from ExerciseDB API
 export async function fetchMuscleExercises(muscleId, limit = 5) {
   const config = EXERCISES[muscleId]
   if (!config) throw new Error(`Unknown muscle: ${muscleId}`)
-  const headers = EXERCISE_DB_KEY ? { 'x-api-key': EXERCISE_DB_KEY } : {}
   const res = await fetch(
-    `${BASE_URL}/muscles/${config.apiMuscle}/exercises?limit=${limit}&offset=0`,
-    { headers }
+    `${BASE_URL}/exercises/muscles?targetMuscles=${encodeURIComponent(config.apiMuscle)}&limit=${limit}`
   )
   if (!res.ok) throw new Error(`API error ${res.status} for ${muscleId}`)
   const json = await res.json()
-  return Array.isArray(json) ? json : (json.data ?? [])
+  const raw = json.data ?? []
+  return raw.map(normalizeExercise)
 }

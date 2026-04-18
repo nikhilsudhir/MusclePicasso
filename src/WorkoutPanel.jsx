@@ -266,6 +266,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
                 <img
                   src={bestExercise.gifUrl}
                   alt={bestExercise.name}
+                  onError={(e) => { e.target.style.display = 'none' }}
                   style={{ width: isMobile ? '100%' : 88, height: isMobile ? 'auto' : 88, borderRadius: 10, objectFit: 'contain', flexShrink: 0, border: '1px solid rgba(255,176,59,0.2)' }}
                 />
               )}
@@ -381,7 +382,7 @@ export default function WorkoutPanel({ paintedMuscles, onBack }) {
                     return (
                       <div key={ex.exerciseId} onClick={() => setSelectedEx({ ex, diff, scheme, role, roleColor, config })} style={{ ...styles.card, borderLeft: `3px solid ${config.color}`, cursor: 'pointer' }}>
                         {ex.gifUrl && (
-                          <img src={ex.gifUrl} alt={ex.name} style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                          <img src={ex.gifUrl} alt={ex.name} onError={(e) => { e.target.style.display = 'none' }} style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: '#eee', textTransform: 'capitalize' }}>{ex.name}</div>
@@ -654,6 +655,7 @@ function ExerciseDetail({ ex, diff, scheme, role, roleColor, config, onClose }) 
           <img
             src={ex.gifUrl}
             alt={ex.name}
+            onError={(e) => { e.target.parentElement.style.display = 'none' }}
             style={{ width: '100%', height: 220, objectFit: 'contain', display: 'block' }}
           />
         </div>
